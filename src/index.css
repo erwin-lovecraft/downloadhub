@@ -1,0 +1,106 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Fluent 2 palette lifted from the DownloadHub.dc.html design
+ * (Claude Design project 3f31d17c-d417-4fd8-8114-04a1b588d99f).
+ * Dark theme is intentionally not implemented yet — Settings shows
+ * "coming soon" for it, matching the design.
+ */
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Segoe UI Variable Display", "Segoe UI", -apple-system,
+    BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-rail: var(--rail);
+  --color-agent: var(--agent);
+  --color-agent-foreground: var(--agent-foreground);
+  --color-agent-subtle: var(--agent-subtle);
+  --color-status-queued: var(--status-queued);
+  --color-status-queued-bg: var(--status-queued-bg);
+  --color-status-downloading: var(--status-downloading);
+  --color-status-downloading-bg: var(--status-downloading-bg);
+  --color-status-paused: var(--status-paused);
+  --color-status-paused-bg: var(--status-paused-bg);
+  --color-status-failed: var(--status-failed);
+  --color-status-failed-bg: var(--status-failed-bg);
+  --color-status-completed: var(--status-completed);
+  --color-status-completed-bg: var(--status-completed-bg);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.5);
+  --radius-xl: calc(var(--radius) * 2);
+  --radius-2xl: calc(var(--radius) * 2.5);
+}
+
+:root {
+  --background: #f3f3f3;
+  --foreground: #1b1a19;
+  --card: #ffffff;
+  --card-foreground: #1b1a19;
+  --popover: #ffffff;
+  --popover-foreground: #1b1a19;
+  --primary: #0078d4;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #1b1a19;
+  --muted: #f0f0f0;
+  --muted-foreground: #605e5c;
+  --accent: #eff6fc;
+  --accent-foreground: #0078d4;
+  --destructive: #c42b1c;
+  --border: rgb(0 0 0 / 8%);
+  --input: rgb(0 0 0 / 14%);
+  --ring: #0078d4;
+  --radius: 4px;
+  --rail: #fafafa;
+
+  --agent: #8764b8;
+  --agent-foreground: #ffffff;
+  --agent-subtle: #f3effa;
+
+  --status-queued: #605e5c;
+  --status-queued-bg: #f0f0f0;
+  --status-downloading: #0078d4;
+  --status-downloading-bg: #eff6fc;
+  --status-paused: #9d5d00;
+  --status-paused-bg: #fff4ce;
+  --status-failed: #c42b1c;
+  --status-failed-bg: #fde7e9;
+  --status-completed: #0f7b0f;
+  --status-completed-bg: #dff6dd;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+}
