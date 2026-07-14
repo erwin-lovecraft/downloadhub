@@ -36,6 +36,19 @@ Tokens are stored in the OS keychain via the `keyring` crate, never in a
 plaintext file. Without a `.env`/env vars set, the app still runs — the
 "Sign in with Google" button will just report that OAuth isn't configured.
 
+## YouTube search setup (dev)
+
+Keyword search calls `search.list`/`videos.list` with a plain API key (no
+OAuth needed for this).
+
+1. In the same [Google Cloud Console project](https://console.cloud.google.com/apis/credentials),
+   create an **API key** and enable the **YouTube Data API v3** for the
+   project.
+2. Set `YOUTUBE_API_KEY` in your `.env` (see [`.env.example`](.env.example)).
+
+Without it set, the app still runs — search reports that it isn't
+configured.
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)

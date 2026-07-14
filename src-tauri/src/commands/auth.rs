@@ -1,32 +1,10 @@
 //! Thin Tauri command handlers for Google login. All OAuth/keychain logic
 //! lives in `downloadhub_core::auth`; this module just wires it to IPC.
 
-use downloadhub_core::auth::{self, AuthConfig, LoginFlow, UserInfo};
+use crate::state::AppState;
+use downloadhub_core::auth::{self, LoginFlow, UserInfo};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
-
-/// Holds config that's only available once, read from the environment at
-/// startup. `None` means Google OAuth env vars weren't set, which is fine
-/// for running the app without login wired up yet.
-pub struct AppState {
-    pub auth_config: Option<AuthConfig>,
-}
-
-impl AppState {
-    pub fn from_env() -> Self {
-        let auth_config = match (
-            std::env::var("GOOGLE_OAUTH_CLIENT_ID"),
-            std::env::var("GOOGLE_OAUTH_CLIENT_SECRET"),
-        ) {
-            (Ok(client_id), Ok(client_secret)) => Some(AuthConfig {
-                client_id,
-                client_secret,
-            }),
-            _ => None,
-        };
-        Self { auth_config }
-    }
-}
 
 fn to_string_err(e: impl std::fmt::Display) -> String {
     e.to_string()

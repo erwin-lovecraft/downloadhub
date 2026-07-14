@@ -11,7 +11,7 @@ name = "downloadhub_core"
 [dependencies]
 keyring = { version = "4.1.4", features = ["v1"] }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json", "query"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 thiserror = "2.0.18"
