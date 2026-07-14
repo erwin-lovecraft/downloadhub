@@ -1,14 +1,38 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+mod commands;
+
+use commands::auth::AppState;
+
+fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .plugin(tauri_plugin_opener::init())
+        .manage(AppState::from_env())
+        .invoke_handler(tauri::generate_handler![
+            commands::auth::auth_login,
+            commands::auth::auth_logout,
+            commands::auth::auth_status,
+        ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+    // Dev convenience: load GOOGLE_OAUTH_CLIENT_ID/SECRET from a gitignored
+    // .env file if present. No-op (and not an error) if the file is missing.
+    let _ = dotenvy::dotenv();
+
+    configure(tauri::Builder::default())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_builds_with_registered_commands() {
+        let app = configure(tauri::test::mock_builder())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("app should build with auth commands registered");
+        drop(app);
+    }
 }

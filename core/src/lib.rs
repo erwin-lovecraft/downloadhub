@@ -10,3 +10,5 @@
 //! - `queue`: download queue state machine + SQLite persistence
 //! - `download`: download orchestrator, progress reporting, resume support
 //! - `auth`: Google OAuth token acquisition/storage (via `keyring`)
+
+pub mod auth;

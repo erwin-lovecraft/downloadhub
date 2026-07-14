@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 
 # Rust workspace build output (cargo builds to the workspace root by default)
 /target/
@@ -20,6 +21,7 @@ src-tauri/gen/schemas
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/settings.local.json
 .DS_Store
 *.suo
 *.ntvs*
