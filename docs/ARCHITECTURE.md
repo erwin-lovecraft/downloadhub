@@ -48,12 +48,23 @@ be revisited and finalized when Phase 3 work starts if a shared-DB approach
 turns out to be insufficient (e.g. if live progress events need to reach the
 MCP client while the desktop app is doing the actual downloading).
 
-### YouTube Data API client (decide during Phase 1 search step)
+### YouTube Data API client
 
-Not yet decided — will be recorded here once the search/metadata step is
-implemented: either the `google-apis-youtube3` generated client, or direct
-`reqwest` + `serde` calls against the REST API, depending on which is less
-friction to integrate.
+Decided: direct `reqwest` + `serde` calls against the REST API
+(`core::youtube`), not the generated `google-youtube3` crate.
+`search.list`/`videos.list` are plain API-key-authenticated GET requests
+with a small response shape we only need a few fields from; the generated
+client would additionally pull in `yup-oauth2` and its own
+authenticator/hyper-connector setup to make the same calls — a second,
+redundant OAuth stack alongside the `oauth2`-based one `core::auth` already
+uses, for no benefit on unauthenticated API-key calls. `reqwest` was
+already a `core` dependency for the Google userinfo call in `core::auth`.
+
+`search.list` doesn't return video duration, so `search_videos` makes a
+follow-up `videos.list` call (`part=contentDetails`) batched over all
+result IDs and merges `contentDetails.duration` (ISO 8601, e.g. `PT4M13S`)
+back in via a small hand-rolled parser (`core::youtube::duration`) — not
+worth a dependency for a four-field, well-specified format.
 
 ### Muxing extension point
 

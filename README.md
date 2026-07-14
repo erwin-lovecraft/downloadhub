@@ -20,6 +20,35 @@ in turn is built on [`kkdai/youtube`](https://github.com/kkdai/youtube).
 Because of this, the whole project is GPL-licensed; no proprietary/closed
 dependency may be added to any crate that links against `y7dl`.
 
+## Google OAuth setup (dev)
+
+Login uses the installed-app/loopback flow, so no server-side redirect URI
+needs to be pre-registered — any `http://127.0.0.1:<port>` is accepted by a
+"Desktop app" OAuth client.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
+   create an OAuth 2.0 Client ID with application type **Desktop app**.
+2. Copy [`.env.example`](.env.example) to `.env` (gitignored) and fill in
+   `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` from that client.
+3. Run `pnpm tauri dev`. The `.env` file is loaded automatically on startup.
+
+Tokens are stored in the OS keychain via the `keyring` crate, never in a
+plaintext file. Without a `.env`/env vars set, the app still runs — the
+"Sign in with Google" button will just report that OAuth isn't configured.
+
+## YouTube search setup (dev)
+
+Keyword search calls `search.list`/`videos.list` with a plain API key (no
+OAuth needed for this).
+
+1. In the same [Google Cloud Console project](https://console.cloud.google.com/apis/credentials),
+   create an **API key** and enable the **YouTube Data API v3** for the
+   project.
+2. Set `YOUTUBE_API_KEY` in your `.env` (see [`.env.example`](.env.example)).
+
+Without it set, the app still runs — search reports that it isn't
+configured.
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)

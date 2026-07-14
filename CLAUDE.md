@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-This repo is currently the **unmodified default scaffold** from `pnpm create tauri-app` (Tauri v2 + React + TypeScript + Vite). It has a single `greet` command in `src-tauri/src/lib.rs` and a default React counter UI — none of the product features described below exist yet. `src-tauri/Cargo.toml` is a single crate, not yet split into the `core` / `app` / `mcp-server` workspace described below.
+Phase 1 is in progress. The Cargo workspace split (`core` / `src-tauri` / `mcp-server`) described below is done, as are the root `LICENSE` and README attribution. Step 2 (Google OAuth login) is implemented: `core::auth` does the installed-app/loopback flow via `oauth2` + token storage via `keyring`, `src-tauri/src/commands/auth.rs` exposes `auth_login`/`auth_logout`/`auth_status` commands, and the frontend (Tailwind + shadcn/ui + TanStack Query) shows signed-in state. Step 3 (keyword search) is implemented: `core::youtube` calls `search.list`/`videos.list` directly via `reqwest` (see `docs/ARCHITECTURE.md` for why, over the generated client), exposed as the `search_videos` command, with a search box + results list (thumbnail/title/channel/duration) in the UI. See [`README.md`](README.md) for the `.env` setup needed to exercise login and search. Steps 4+ (format/quality lookup via `y7dl`, download queue, downloads) are not yet implemented.
 
 ## What this project is
 
