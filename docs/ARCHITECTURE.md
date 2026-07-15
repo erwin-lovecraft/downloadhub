@@ -258,6 +258,54 @@ video-only and audio-only streams as separate, clearly labeled files. A
 `downloadhub-core`'s download-completion path once a transcode crate is
 selected, so muxing can be plugged in without a rewrite.
 
+## Phase 2
+
+### Playlist import (bulk add to queue)
+
+`playlistItems.list` (`core::youtube::list_playlist_items`, paginated up
+to a 200-item cap so one import can't turn into an unbounded number of API
+calls) only returns metadata — no format/itag info, same as `search.list`.
+A single-video queue entry needs one concrete resolved itag, and which
+itags a video actually offers varies video to video, so asking the user to
+pick one itag for an entire playlist import isn't meaningful the way it is
+for a single video's "view formats" flow.
+
+Instead, `core::stream::FormatPreference` (`BestProgressive` /
+`BestAudioOnly`) is a two-option quality *shortcut*: `core::playlist`
+resolves each selected video's own format list against it individually
+(`StreamClient::resolve_preferred_format`, reusing the exact same
+`get_video_formats` call the single-video flow already makes) and enqueues
+whatever itag that resolves to for that video — sequentially, one call per
+video. This was a deliberate choice over either (a) hardcoding a
+"universal" itag like 18/140 across the whole playlist, which is fragile
+(not guaranteed present on every video) and wouldn't adapt to actually
+picking the *highest* available quality, or (b) storing an unresolved
+preference on the queue entry itself and resolving it later at download
+time, which would mean widening `QueueEntry`'s `itag: u32` — an
+already-shipped, tested Phase 1 field — into some kind of
+resolved-or-preference union for a Phase 2 feature. `BestProgressive`
+deliberately does *not* fall back to a video-only format when no
+progressive one exists; silently producing a video with no audio would
+violate what "video + audio" quality was asked for. Sequential (not
+concurrent) resolution matches the codebase's current single-download-at-
+a-time reality — Phase 2's own next step is exactly "concurrent downloads
+(configurable limit, default ~3)", so adding concurrency here first would
+be building ahead of that step.
+
+A video that fails to resolve (deleted/private/region-locked, or no
+format matching the preference) is skipped and reported with a reason
+rather than aborting the whole import — resolving up front, at import
+time rather than later at download time, means these show up immediately
+in the "N added, M skipped" result instead of only surfacing much later as
+a stuck `Failed` queue entry.
+
+`list_playlist_items` (preview) and `import_playlist_to_queue` (bulk
+resolve + add) are two separate commands/steps in the UI, mirroring the
+existing single-video "search → view formats → add" pattern: the user
+sees what's actually in the playlist (with individually-deselectable
+checkboxes, all selected by default) before committing to adding
+potentially dozens of queue entries in one action.
+
 ## License
 
 This project depends on [`y7dl`](https://github.com/erwin-lovecraft/y7dl)

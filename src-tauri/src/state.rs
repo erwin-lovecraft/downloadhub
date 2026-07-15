@@ -58,6 +58,15 @@ impl AppState {
                 .to_string()
         })
     }
+
+    /// The YouTube Data API key, or a user-facing error if it wasn't
+    /// configured. Shared by every command that calls the YouTube API.
+    pub fn youtube_api_key(&self) -> Result<String, String> {
+        self.youtube_api_key.clone().ok_or_else(|| {
+            "YouTube search is not configured. Set YOUTUBE_API_KEY (see README) and restart the app."
+                .to_string()
+        })
+    }
 }
 
 fn open_queue_store() -> Option<QueueStore> {

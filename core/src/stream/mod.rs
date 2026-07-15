@@ -82,6 +82,37 @@ pub struct VideoDetail {
     pub formats: Vec<FormatSummary>,
 }
 
+/// A quality shortcut for bulk operations (playlist import) that can't
+/// reasonably ask the user to pick an exact itag per video, since the
+/// available itags vary video to video.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FormatPreference {
+    /// Highest-resolution format that has both video and audio in one
+    /// stream. Deliberately doesn't fall back to a video-only format if no
+    /// progressive one exists — silently producing a video with no sound
+    /// would violate what the user asked for.
+    BestProgressive,
+    /// Highest-bitrate audio-only format.
+    BestAudioOnly,
+}
+
+/// Picks the format matching `preference` from an already-fetched list, or
+/// `None` if nothing qualifies. Pure/no I/O so it's unit-testable without a
+/// real video lookup.
+fn select_format(formats: &[FormatSummary], preference: FormatPreference) -> Option<&FormatSummary> {
+    match preference {
+        FormatPreference::BestProgressive => formats
+            .iter()
+            .filter(|f| f.has_video && f.has_audio)
+            .max_by_key(|f| f.height.unwrap_or(0)),
+        FormatPreference::BestAudioOnly => formats
+            .iter()
+            .filter(|f| f.has_audio && !f.has_video)
+            .max_by_key(|f| f.bitrate.unwrap_or(0)),
+    }
+}
+
 /// Thin wrapper over `y7dl::Client`. Reuse one instance across lookups: the
 /// underlying client caches parsed player JS and pools HTTP connections.
 pub struct StreamClient(y7dl::Client);
@@ -110,6 +141,23 @@ impl StreamClient {
         })
     }
 
+    /// Fetches a video's formats and picks the one matching `preference`.
+    /// Used for playlist import, where asking the user to pick an exact
+    /// itag per video isn't practical. Returns [`StreamError::FormatNotFound`]
+    /// if nothing matches (e.g. `BestProgressive` on a video YouTube only
+    /// serves as separate video/audio DASH streams).
+    pub async fn resolve_preferred_format(
+        &self,
+        url_or_id: &str,
+        preference: FormatPreference,
+    ) -> Result<(VideoDetail, FormatSummary), StreamError> {
+        let detail = self.get_video_formats(url_or_id).await?;
+        let format = select_format(&detail.formats, preference)
+            .cloned()
+            .ok_or(StreamError::FormatNotFound)?;
+        Ok((detail, format))
+    }
+
     /// Fetches raw `y7dl` video metadata (including formats with their
     /// stream URLs) for a video URL or bare ID. Exposed for `core::download`,
     /// which needs the raw `y7dl::Format` (stream URL, mime type) rather than
@@ -131,5 +179,59 @@ impl StreamClient {
         W: tokio::io::AsyncWrite + Unpin + ?Sized,
     {
         Ok(self.0.download(video, format, dest).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn format(itag: u32, has_video: bool, has_audio: bool, height: Option<u32>, bitrate: Option<u64>) -> FormatSummary {
+        FormatSummary {
+            itag,
+            mime_type: "video/mp4".to_string(),
+            quality: None,
+            quality_label: None,
+            width: None,
+            height,
+            fps: None,
+            bitrate,
+            content_length_bytes: None,
+            has_video,
+            has_audio,
+        }
+    }
+
+    #[test]
+    fn best_progressive_picks_highest_resolution_progressive_format() {
+        let formats = vec![
+            format(18, true, true, Some(360), None),
+            format(22, true, true, Some(720), None),
+            // Higher resolution but video-only -- must not be picked for
+            // BestProgressive, or the user would silently get no audio.
+            format(137, true, false, Some(1080), None),
+        ];
+        let picked = select_format(&formats, FormatPreference::BestProgressive).unwrap();
+        assert_eq!(picked.itag, 22);
+    }
+
+    #[test]
+    fn best_progressive_returns_none_when_no_progressive_format_exists() {
+        let formats = vec![
+            format(137, true, false, Some(1080), None),
+            format(140, false, true, None, Some(128_000)),
+        ];
+        assert!(select_format(&formats, FormatPreference::BestProgressive).is_none());
+    }
+
+    #[test]
+    fn best_audio_only_picks_highest_bitrate_audio_only_format() {
+        let formats = vec![
+            format(18, true, true, Some(360), Some(96_000)),
+            format(139, false, true, None, Some(48_000)),
+            format(140, false, true, None, Some(128_000)),
+        ];
+        let picked = select_format(&formats, FormatPreference::BestAudioOnly).unwrap();
+        assert_eq!(picked.itag, 140);
     }
 }
