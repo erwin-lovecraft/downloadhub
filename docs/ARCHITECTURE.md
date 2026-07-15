@@ -112,6 +112,23 @@ rather than the app failing to start, mirroring how a missing
 processes sharing this same SQLite file rather than one calling into the
 other — this module is that shared source of truth.
 
+### Output folder picker
+
+The output-path field added in step 5 is filled via the official
+`tauri-plugin-dialog`'s native folder picker (`open({ directory: true })`)
+rather than a custom file-browser widget, plus the plugin's own permission
+(`dialog:default` in `src-tauri/capabilities/default.json`) — same pattern
+already used for `tauri-plugin-opener` (Google OAuth's browser launch). The
+field stays freely editable as plain text too, so a folder can still be
+pasted/typed directly.
+
+`queue_entries.output_path` holds a destination *folder*, not a full file
+path: `y7dl` doesn't mux, so a DASH download can produce two files
+(`<title>.video.<ext>` + `<title>.audio.<ext>`) for one queue entry — the
+download orchestrator (a later step) derives filenames from the video title
+and format inside that folder rather than the queue storing a single
+pre-decided filename.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save

@@ -60,8 +60,9 @@ configure.
 The queue is a local SQLite database at
 `<platform-data-dir>/downloadhub/queue.sqlite3` (bundled SQLite via
 `rusqlite`, no separate install needed). Nothing to configure; the file and
-its parent directory are created automatically on first run. Output paths
-are entered manually for now — a folder picker lands in a later step.
+its parent directory are created automatically on first run. The output
+folder for each entry can be typed directly or picked via the native
+folder dialog ("Browse..." next to the field).
 
 ## Recommended IDE Setup
 
