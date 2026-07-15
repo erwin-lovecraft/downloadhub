@@ -14,15 +14,15 @@ export function AuthPanel() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center gap-3">
-        <Button onClick={() => login.mutate()} disabled={login.isPending}>
-          {login.isPending ? "Waiting for Google..." : "Sign in with Google"}
-        </Button>
+      <div className="flex items-center gap-3">
         {error && (
-          <p className="max-w-sm text-center text-sm text-destructive">
+          <p className="max-w-sm text-sm text-destructive">
             {error instanceof Error ? error.message : String(error)}
           </p>
         )}
+        <Button onClick={() => login.mutate()} disabled={login.isPending}>
+          {login.isPending ? "Waiting for Google..." : "Sign in with Google"}
+        </Button>
       </div>
     );
   }

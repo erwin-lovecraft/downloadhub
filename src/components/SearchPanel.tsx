@@ -17,8 +17,8 @@ export function SearchPanel() {
   }
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-4">
-      <form onSubmit={onSubmit} className="flex gap-2">
+    <div className="flex h-full flex-col gap-4">
+      <form onSubmit={onSubmit} className="flex shrink-0 gap-2">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -30,16 +30,16 @@ export function SearchPanel() {
       </form>
 
       {search.error && (
-        <p className="text-sm text-destructive">
+        <p className="shrink-0 text-sm text-destructive">
           {search.error instanceof Error ? search.error.message : String(search.error)}
         </p>
       )}
 
       {search.data && search.data.length === 0 && (
-        <p className="text-sm text-muted-foreground">No results.</p>
+        <p className="shrink-0 text-sm text-muted-foreground">No results.</p>
       )}
 
-      <ul className="flex flex-col gap-3">
+      <ul className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {search.data?.map((video) => (
           <li key={video.video_id} className="flex gap-3 rounded-md border p-2">
             {video.thumbnail_url && (
@@ -68,9 +68,7 @@ export function SearchPanel() {
         ))}
       </ul>
 
-      {selectedVideoId && (
-        <VideoDetailPanel videoId={selectedVideoId} onClose={() => setSelectedVideoId(null)} />
-      )}
+      <VideoDetailPanel videoId={selectedVideoId} onClose={() => setSelectedVideoId(null)} />
     </div>
   );
 }
