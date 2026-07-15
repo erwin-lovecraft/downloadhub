@@ -470,6 +470,30 @@ the initialize handshake — useful display context ("Requested by
 claude-desktop"), but not an authenticated identity, and the UI treats it
 as informational only.
 
+### Packaging: mcp-server as a Tauri sidecar
+
+The `mcp-server` binary ships *inside* the desktop app installer rather
+than as a separate download, so "install DownloadHub" is a single step and
+the binary is guaranteed to match the app version. It's declared as a
+Tauri `externalBin` sidecar (`bundle.externalBin: ["binaries/mcp-server"]`
+in `tauri.conf.json`); `tauri build` embeds `src-tauri/binaries/
+mcp-server-<target-triple>` next to the main app executable in the bundle
+(Tauri strips the triple suffix at bundle time). `scripts/build-sidecar.mjs`
+(run by the `sidecar`/`package` npm scripts, and by `.github/workflows/
+build-windows.yml`) builds `mcp-server` in release and copies it to that
+triple-suffixed path first — Tauri validates the file exists at compile
+time, so it must run before `tauri build`. The staged binaries are
+gitignored build artifacts.
+
+The app doesn't *spawn* the sidecar itself (so no `tauri-plugin-shell`
+dependency) — external MCP clients like Claude Desktop spawn it by absolute
+path. The `mcp_server_path` command resolves that path from the running
+app's own `current_exe()` location (correct wherever the user installed
+it), which the Settings dialog surfaces along with a copy-paste client
+config block. Under `tauri dev` the sidecar isn't staged next to the debug
+binary, so the shown path won't exist until a real build — that's fine, the
+connect UI is only actionable in an installed build anyway.
+
 ## License
 
 This project depends on [`y7dl`](https://github.com/erwin-lovecraft/y7dl)

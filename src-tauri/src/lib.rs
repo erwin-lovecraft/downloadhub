@@ -27,6 +27,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::agent::list_pending_agent_actions,
             commands::agent::approve_agent_action,
             commands::agent::reject_agent_action,
+            commands::mcp::mcp_server_path,
         ])
 }
 

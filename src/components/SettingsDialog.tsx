@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { pickOutputFolder } from "@/lib/dialog";
+import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
 import type { FormatPreference } from "@/lib/playlist";
 
 export function SettingsDialog({
@@ -24,6 +25,8 @@ export function SettingsDialog({
   const [outputPath, setOutputPath] = useState("");
   const [quality, setQuality] = useState<FormatPreference>("best_progressive");
   const [mcpEnabled, setMcpEnabled] = useState(true);
+  const [serverPath, setServerPath] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (settings.data) {
@@ -32,6 +35,25 @@ export function SettingsDialog({
       setMcpEnabled(settings.data.mcp_enabled);
     }
   }, [settings.data]);
+
+  useEffect(() => {
+    if (open) {
+      mcpServerPath()
+        .then(setServerPath)
+        .catch(() => setServerPath(null));
+      setCopied(false);
+    }
+  }, [open]);
+
+  async function copyAgentConfig() {
+    if (!serverPath) return;
+    try {
+      await navigator.clipboard.writeText(buildAgentConfig(serverPath));
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   function handleOpenChange(next: boolean) {
     if (!next) save.reset();
@@ -118,6 +140,23 @@ export function SettingsDialog({
                 needs your approval here first.
               </p>
             </div>
+
+            {mcpEnabled && serverPath && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">Connect an AI agent</label>
+                <p className="text-xs text-muted-foreground">
+                  Add this to your agent's MCP config (Claude Desktop, Claude
+                  Code, Gemini CLI, Codex). Fill in your YouTube API key if you
+                  want keyword search. See docs/MCP_SETUP.md for per-agent steps.
+                </p>
+                <pre className="max-h-40 overflow-auto rounded-md border bg-muted p-2 text-xs">
+                  {buildAgentConfig(serverPath)}
+                </pre>
+                <Button type="button" variant="outline" size="sm" onClick={copyAgentConfig}>
+                  {copied ? "Copied!" : "Copy config"}
+                </Button>
+              </div>
+            )}
 
             <Button
               type="button"

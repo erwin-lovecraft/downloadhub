@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod auth;
 pub mod download;
+pub mod mcp;
 pub mod playlist;
 pub mod queue;
 pub mod settings;
