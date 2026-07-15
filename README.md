@@ -70,6 +70,17 @@ backend. No config needed. A DASH (adaptive) format saves as
 `<title>.video.<ext>` and/or `<title>.audio.<ext>` in the output folder
 (no muxing yet); a progressive format saves as a single `<title>.<ext>`.
 
+## AI agent access (MCP server)
+
+External AI agents (Claude Desktop, Claude Code, Gemini CLI, Codex CLI, …)
+can search YouTube and propose downloads through the bundled MCP server
+(`cargo build --release -p downloadhub-mcp-server`). Anything an agent
+requests that would change the queue or start a download waits as a
+pending request in the app's "AI agent requests" panel until you approve
+or reject it — nothing runs unattended. Agent access can be switched off
+entirely in the app's Settings dialog (it's on by default). Registration
+instructions per agent live in [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
