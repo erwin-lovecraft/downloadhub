@@ -211,6 +211,45 @@ progress Zustand store client-side, since nothing else would (no
 `status: "downloading"` entry there would otherwise keep the UI showing a
 live progress bar and a Cancel button indefinitely.
 
+### App shell layout
+
+No `docs/design/` directory exists yet (the Fluent design mentioned in
+`CLAUDE.md` hasn't been exported into the repo), so per that same doc's
+fallback — "otherwise use clean shadcn/ui defaults for now" — this step is
+a usability pass on the existing shadcn-default UI, not a redesign. A
+separate, much earlier branch (`feat/fluent-design-frontend-scaffold`,
+PR #1) attempted the Fluent port directly off `Initial project`, before any
+of steps 2–8 existed; it's an abandoned WIP snapshot now (last commit
+predates all of them, `mergeStateStatus: DIRTY` against current `main`) and
+was left alone rather than reconciled into this step.
+
+The previous layout stacked every panel in a single centered column with
+no bounded height, so a long search-results or queue list just grew the
+whole window instead of scrolling in place, and the 800×600 default window
+(`tauri.conf.json`) was too small to show search results and the queue at
+once. `App.tsx` now renders a fixed header (title + `AuthPanel`) over a
+two-column body — search on the left, a `QueuePanel` sidebar on the right —
+inside an `h-screen` root, with each column independently
+`overflow-y-auto` inside a `min-h-0 flex-1` list so it scrolls in place
+rather than expanding its container. The window default grew to 1100×750
+with a 760×480 floor (`minWidth`/`minHeight`) that still holds up at that
+size, verified in a browser preview resized to match.
+
+`VideoDetailPanel` moved from an inline block appended below the search
+results (pushing everything below it down the page as results and formats
+piled up) to a `Dialog` (shadcn/`@base-ui/react`), mounted unconditionally
+in `SearchPanel` and controlled by the dialog's own `open`/`onOpenChange`
+rather than conditional mounting — `useVideoFormats` already tolerated a
+`null` id (query stays `disabled`), so no hook changes were needed, just
+widening its `videoId` prop type to match.
+
+Each `QueuePanel` entry's title also moved to its own row instead of
+sharing a line with the status badge and action buttons: in the 320px
+sidebar, a title sharing a row with "downloading" + Cancel + Remove had
+almost no width left and truncated after a handful of characters on any
+real (non-mock) title — verified by mocking `list_queue` with a
+deliberately long title in the browser preview before and after this fix.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save

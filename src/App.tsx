@@ -7,12 +7,22 @@ function App() {
   useDownloadProgressListener();
 
   return (
-    <main className="flex min-h-screen flex-col items-center gap-6 bg-background p-10 text-foreground">
-      <h1 className="text-xl font-semibold">downloadhub</h1>
-      <AuthPanel />
-      <SearchPanel />
-      <QueuePanel />
-    </main>
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <header className="flex shrink-0 items-center justify-between border-b px-6 py-3">
+        <h1 className="text-lg font-semibold">downloadhub</h1>
+        <AuthPanel />
+      </header>
+
+      <div className="flex min-h-0 flex-1 gap-6 overflow-hidden p-6">
+        <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <SearchPanel />
+        </section>
+
+        <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l pl-6">
+          <QueuePanel />
+        </aside>
+      </div>
+    </div>
   );
 }
 

@@ -22,22 +22,24 @@ export function QueuePanel() {
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-3">
-      <span className="text-sm font-medium">Download queue</span>
+    <div className="flex h-full flex-col gap-3">
+      <span className="shrink-0 text-sm font-medium">Download queue</span>
 
-      {list.isLoading && <p className="text-sm text-muted-foreground">Loading queue...</p>}
+      {list.isLoading && (
+        <p className="shrink-0 text-sm text-muted-foreground">Loading queue...</p>
+      )}
 
       {list.error && (
-        <p className="text-sm text-destructive">
+        <p className="shrink-0 text-sm text-destructive">
           {list.error instanceof Error ? list.error.message : String(list.error)}
         </p>
       )}
 
       {list.data && list.data.length === 0 && (
-        <p className="text-sm text-muted-foreground">Queue is empty.</p>
+        <p className="shrink-0 text-sm text-muted-foreground">Queue is empty.</p>
       )}
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {list.data?.map((entry) => {
           const progress = progressByQueueId[entry.id];
           const isDownloading = entry.status === "downloading" || progress?.status === "downloading";
@@ -50,10 +52,12 @@ export function QueuePanel() {
 
           return (
             <li key={entry.id} className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+              <span className="truncate text-sm font-medium" title={entry.title}>
+                {entry.title}
+              </span>
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-medium">{entry.title}</span>
+                <span className={statusClassName(entry.status)}>{entry.status}</span>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className={statusClassName(entry.status)}>{entry.status}</span>
                   {isDownloading ? (
                     <Button
                       size="xs"
@@ -86,7 +90,9 @@ export function QueuePanel() {
               <span className="text-muted-foreground">
                 {entry.quality_label ?? "audio"} (itag {entry.itag})
               </span>
-              <span className="truncate text-muted-foreground">{entry.output_path}</span>
+              <span className="truncate text-muted-foreground" title={entry.output_path}>
+                {entry.output_path}
+              </span>
               {isDownloading && (
                 <div className="flex items-center gap-2">
                   {percent !== null && (
