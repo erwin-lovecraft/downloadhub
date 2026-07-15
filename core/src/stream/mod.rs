@@ -84,14 +84,16 @@ pub struct VideoDetail {
 
 /// A quality shortcut for bulk operations (playlist import) that can't
 /// reasonably ask the user to pick an exact itag per video, since the
-/// available itags vary video to video.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+/// available itags vary video to video. Also used as the persisted
+/// default quality in `core::settings`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormatPreference {
     /// Highest-resolution format that has both video and audio in one
     /// stream. Deliberately doesn't fall back to a video-only format if no
     /// progressive one exists — silently producing a video with no sound
     /// would violate what the user asked for.
+    #[default]
     BestProgressive,
     /// Highest-bitrate audio-only format.
     BestAudioOnly,

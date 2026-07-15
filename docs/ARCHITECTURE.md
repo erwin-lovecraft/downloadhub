@@ -286,11 +286,9 @@ already-shipped, tested Phase 1 field — into some kind of
 resolved-or-preference union for a Phase 2 feature. `BestProgressive`
 deliberately does *not* fall back to a video-only format when no
 progressive one exists; silently producing a video with no audio would
-violate what "video + audio" quality was asked for. Sequential (not
-concurrent) resolution matches the codebase's current single-download-at-
-a-time reality — Phase 2's own next step is exactly "concurrent downloads
-(configurable limit, default ~3)", so adding concurrency here first would
-be building ahead of that step.
+violate what "video + audio" quality was asked for. Resolution is
+sequential, one video at a time, matching the codebase's current
+single-download-at-a-time reality.
 
 A video that fails to resolve (deleted/private/region-locked, or no
 format matching the preference) is skipped and reported with a reason
@@ -305,6 +303,36 @@ existing single-video "search → view formats → add" pattern: the user
 sees what's actually in the playlist (with individually-deselectable
 checkboxes, all selected by default) before committing to adding
 potentially dozens of queue entries in one action.
+
+### Settings (default output folder, default quality)
+
+Reprioritized ahead of the rest of the originally-planned Phase 2 order
+(concurrent downloads, resumable downloads) at the user's explicit
+request, since these defaults are useful immediately and don't depend on
+anything else in Phase 2.
+
+`core::settings` is a small JSON blob (`AppSettings { default_output_path,
+default_quality }`) at `<platform-data-dir>/downloadhub/settings.json`,
+alongside `queue.sqlite3` — `AppState::resolve_app_data_dir` (renamed from
+the queue-only `open_queue_store`'s inline logic) now resolves that shared
+directory once and hands it to both. A missing file (first run) loads as
+`AppSettings::default()`; a *present but corrupt* file still errors rather
+than silently discarding whatever the user had saved — those are different
+situations and shouldn't be handled the same way. No caching: settings are
+read/written directly against the file on each `get_settings`/
+`save_settings` call, since both happen rarely (app startup, opening the
+settings dialog) and a stale in-memory copy would be its own source of
+bugs for essentially zero benefit at this frequency.
+
+`default_quality` reuses `core::stream::FormatPreference` — the same
+two-option quality shortcut playlist import already uses — rather than
+inventing a separate settings-only quality type. `SearchPanel`'s
+`VideoDetailPanel` and `PlaylistImportDialog` both seed their local output-
+path (and, for the playlist dialog, quality) form state from
+`get_settings` each time they open (not on every render, so it doesn't
+clobber whatever the user's already typed/picked while a dialog stays
+open) — pre-filling rather than forcing, since both flows still let the
+user override per-add.
 
 ## License
 
