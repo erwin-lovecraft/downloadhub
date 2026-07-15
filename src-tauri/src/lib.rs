@@ -13,12 +13,14 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::auth::auth_logout,
             commands::auth::auth_status,
             commands::youtube::search_videos,
+            commands::youtube::list_playlist_items,
             commands::video::get_video_formats,
             commands::queue::add_to_queue,
             commands::queue::list_queue,
             commands::queue::remove_from_queue,
             commands::download::start_download,
             commands::download::cancel_download,
+            commands::playlist::import_playlist_to_queue,
         ])
 }
 

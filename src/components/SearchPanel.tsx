@@ -3,11 +3,13 @@ import { useSearchVideos } from "@/hooks/useSearchVideos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VideoDetailPanel } from "@/components/VideoDetailPanel";
+import { PlaylistImportDialog } from "@/components/PlaylistImportDialog";
 import { formatDuration } from "@/lib/format";
 
 export function SearchPanel() {
   const [query, setQuery] = useState("");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [playlistDialogOpen, setPlaylistDialogOpen] = useState(false);
   const search = useSearchVideos();
 
   function onSubmit(e: React.FormEvent) {
@@ -26,6 +28,9 @@ export function SearchPanel() {
         />
         <Button type="submit" disabled={search.isPending || !query.trim()}>
           {search.isPending ? "Searching..." : "Search"}
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setPlaylistDialogOpen(true)}>
+          Import playlist
         </Button>
       </form>
 
@@ -69,6 +74,7 @@ export function SearchPanel() {
       </ul>
 
       <VideoDetailPanel videoId={selectedVideoId} onClose={() => setSelectedVideoId(null)} />
+      <PlaylistImportDialog open={playlistDialogOpen} onOpenChange={setPlaylistDialogOpen} />
     </div>
   );
 }

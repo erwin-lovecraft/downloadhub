@@ -38,8 +38,8 @@ plaintext file. Without a `.env`/env vars set, the app still runs — the
 
 ## YouTube search setup (dev)
 
-Keyword search calls `search.list`/`videos.list` with a plain API key (no
-OAuth needed for this).
+Keyword search and playlist import call `search.list`/`videos.list`/
+`playlistItems.list` with a plain API key (no OAuth needed for this).
 
 1. In the same [Google Cloud Console project](https://console.cloud.google.com/apis/credentials),
    create an **API key** and enable the **YouTube Data API v3** for the

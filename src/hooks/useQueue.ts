@@ -3,7 +3,7 @@ import { addToQueue, listQueue, removeFromQueue } from "@/lib/queue";
 import { cancelDownload, startDownload } from "@/lib/download";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 
-const queueQueryKey = ["queue", "list"] as const;
+export const queueQueryKey = ["queue", "list"] as const;
 
 export function useQueue() {
   const queryClient = useQueryClient();
