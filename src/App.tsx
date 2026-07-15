@@ -1,5 +1,6 @@
 import { AuthPanel } from "@/components/AuthPanel";
 import { SearchPanel } from "@/components/SearchPanel";
+import { QueuePanel } from "@/components/QueuePanel";
 
 function App() {
   return (
@@ -7,6 +8,7 @@ function App() {
       <h1 className="text-xl font-semibold">downloadhub</h1>
       <AuthPanel />
       <SearchPanel />
+      <QueuePanel />
     </main>
   );
 }
