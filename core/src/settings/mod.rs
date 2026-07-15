@@ -21,12 +21,34 @@ pub enum SettingsError {
     Serde(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub default_output_path: Option<String>,
     #[serde(default)]
     pub default_quality: FormatPreference,
+    /// Whether the `mcp-server` binary serves tool calls. Defaults to
+    /// enabled (also for settings files saved before this field existed);
+    /// the server re-reads it on every call, so toggling takes effect
+    /// without restarting anything. Even when enabled, queue-mutating MCP
+    /// tools still require per-action user approval — this switch just
+    /// turns agent access off wholesale.
+    #[serde(default = "default_mcp_enabled")]
+    pub mcp_enabled: bool,
+}
+
+fn default_mcp_enabled() -> bool {
+    true
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            default_output_path: None,
+            default_quality: FormatPreference::default(),
+            mcp_enabled: true,
+        }
+    }
 }
 
 /// Loads settings from `path`, or `AppSettings::default()` if the file
@@ -65,11 +87,27 @@ mod tests {
         let settings = AppSettings {
             default_output_path: Some("/tmp/downloads".to_string()),
             default_quality: FormatPreference::BestAudioOnly,
+            mcp_enabled: false,
         };
         save(&path, &settings).await.unwrap();
 
         let loaded = load(&path).await.unwrap();
         assert_eq!(loaded, settings);
+
+        tokio::fs::remove_dir_all(&dir).await.ok();
+    }
+
+    #[tokio::test]
+    async fn settings_file_predating_mcp_enabled_loads_as_enabled() {
+        let dir = std::env::temp_dir().join(format!("downloadhub-settings-test-{}", unique_id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = dir.join("settings.json");
+        tokio::fs::write(&path, br#"{"default_output_path": "/tmp/x"}"#)
+            .await
+            .unwrap();
+
+        let loaded = load(&path).await.unwrap();
+        assert!(loaded.mcp_enabled);
 
         tokio::fs::remove_dir_all(&dir).await.ok();
     }

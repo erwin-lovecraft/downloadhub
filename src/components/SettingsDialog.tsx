@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { pickOutputFolder } from "@/lib/dialog";
 import type { FormatPreference } from "@/lib/playlist";
 
@@ -22,11 +23,13 @@ export function SettingsDialog({
   const { settings, save } = useSettings();
   const [outputPath, setOutputPath] = useState("");
   const [quality, setQuality] = useState<FormatPreference>("best_progressive");
+  const [mcpEnabled, setMcpEnabled] = useState(true);
 
   useEffect(() => {
     if (settings.data) {
       setOutputPath(settings.data.default_output_path ?? "");
       setQuality(settings.data.default_quality);
+      setMcpEnabled(settings.data.mcp_enabled);
     }
   }, [settings.data]);
 
@@ -101,6 +104,21 @@ export function SettingsDialog({
               </div>
             </div>
 
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={mcpEnabled}
+                  onCheckedChange={(checked) => setMcpEnabled(checked === true)}
+                />
+                Allow AI agent access (MCP server)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Lets external AI agents search and propose downloads via the
+                MCP server. Every queue change or download they request still
+                needs your approval here first.
+              </p>
+            </div>
+
             <Button
               type="button"
               disabled={save.isPending}
@@ -108,6 +126,7 @@ export function SettingsDialog({
                 save.mutate({
                   default_output_path: outputPath.trim() || null,
                   default_quality: quality,
+                  mcp_enabled: mcpEnabled,
                 })
               }
             >
