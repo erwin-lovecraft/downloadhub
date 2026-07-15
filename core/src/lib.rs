@@ -12,5 +12,6 @@
 //! - `auth`: Google OAuth token acquisition/storage (via `keyring`)
 
 pub mod auth;
+pub mod queue;
 pub mod stream;
 pub mod youtube;
