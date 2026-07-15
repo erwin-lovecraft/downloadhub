@@ -17,6 +17,9 @@ dist-ssr
 /target/
 src-tauri/gen/schemas
 
+# Bundled mcp-server sidecar binaries, produced by scripts/build-sidecar.mjs
+src-tauri/binaries/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -9,17 +9,24 @@ queue or start a download only record a *pending request*; you approve or
 reject each one in the running DownloadHub desktop app (the "AI agent
 requests" panel above the download queue). Read-only tools answer directly.
 
-## 1. Build the server binary
+## 1. Get the server binary
 
-From the repository root:
+**If you installed DownloadHub from an installer** (`.msi`/`.exe`/`.dmg`),
+the `mcp-server` binary is already bundled *inside* the app — you don't
+build anything. Open the app, go to **Settings → Connect an AI agent**, and
+it shows the exact binary path plus a ready-to-paste config block with a
+"Copy config" button. That path is what the examples below call
+`/path/to/mcp-server`; on Windows it's typically
+`C:\Program Files\downloadhub\mcp-server.exe`.
+
+**If you're working from source instead**, build it directly:
 
 ```sh
 cargo build --release -p downloadhub-mcp-server
 ```
 
-The binary lands at `target/release/mcp-server`. The examples below refer to
-it as `/path/to/downloadhub/target/release/mcp-server` — substitute your
-checkout's absolute path.
+The binary lands at `target/release/mcp-server` (`.exe` on Windows).
+Building the whole app installer with the sidecar bundled is `pnpm package`.
 
 ## 2. Configuration
 
