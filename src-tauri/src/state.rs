@@ -55,14 +55,18 @@ impl AppState {
             _ => None,
         };
         let youtube_api_key = std::env::var("YOUTUBE_API_KEY").ok();
-        let app_data_dir = resolve_app_data_dir();
+        // Shared with the mcp-server binary (same queue database and
+        // settings file), so resolution lives in core::paths.
+        let app_data_dir = downloadhub_core::paths::app_data_dir();
 
         Self {
             auth_config,
             youtube_api_key,
             stream_client: StreamClient::new(),
             queue_store: app_data_dir.as_deref().and_then(open_queue_store),
-            settings_path: app_data_dir.map(|dir| dir.join("settings.json")),
+            settings_path: app_data_dir
+                .as_deref()
+                .map(downloadhub_core::paths::settings_path),
             running_downloads: Mutex::new(HashMap::new()),
             batch_running: AtomicBool::new(false),
         }
@@ -108,22 +112,8 @@ impl AppState {
     }
 }
 
-/// Resolves (and creates, if missing) `<platform-data-dir>/downloadhub`,
-/// shared by the queue database and settings file. `None` if no data
-/// directory is available at all, or it couldn't be created.
-fn resolve_app_data_dir() -> Option<PathBuf> {
-    let dir = dirs::data_dir()
-        .or_else(dirs::home_dir)?
-        .join("downloadhub");
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("failed to create app data directory {dir:?}: {e}");
-        return None;
-    }
-    Some(dir)
-}
-
 fn open_queue_store(app_data_dir: &Path) -> Option<QueueStore> {
-    let db_path = app_data_dir.join("queue.sqlite3");
+    let db_path = downloadhub_core::paths::queue_db_path(app_data_dir);
     match QueueStore::open(&db_path) {
         Ok(store) => Some(store),
         Err(e) => {

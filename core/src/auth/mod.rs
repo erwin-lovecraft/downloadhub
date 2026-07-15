@@ -12,8 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use oauth2::basic::BasicClient;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse,
-    TokenUrl,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -28,7 +27,8 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Refresh proactively this long before actual expiry.
 const EXPIRY_SKEW: Duration = Duration::from_secs(60);
 
-type ConfiguredClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+type ConfiguredClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -90,8 +90,12 @@ pub struct UserInfo {
     pub picture: Option<String>,
 }
 
-fn build_client(config: &AuthConfig, redirect_uri: RedirectUrl) -> Result<ConfiguredClient, AuthError> {
-    let auth_url = AuthUrl::new(AUTH_URL.to_string()).map_err(|e| AuthError::Config(e.to_string()))?;
+fn build_client(
+    config: &AuthConfig,
+    redirect_uri: RedirectUrl,
+) -> Result<ConfiguredClient, AuthError> {
+    let auth_url =
+        AuthUrl::new(AUTH_URL.to_string()).map_err(|e| AuthError::Config(e.to_string()))?;
     let token_url =
         TokenUrl::new(TOKEN_URL.to_string()).map_err(|e| AuthError::Config(e.to_string()))?;
 
@@ -282,7 +286,8 @@ pub async fn fetch_user_info(access_token: &str) -> Result<UserInfo, AuthError> 
 }
 
 fn keyring_entry() -> Result<keyring::Entry, AuthError> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USERNAME).map_err(|e| AuthError::Keyring(e.to_string()))
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USERNAME)
+        .map_err(|e| AuthError::Keyring(e.to_string()))
 }
 
 pub fn store_tokens(tokens: &Tokens) -> Result<(), AuthError> {
