@@ -49,6 +49,12 @@ OAuth needed for this).
 Without it set, the app still runs — search reports that it isn't
 configured.
 
+## Video format/quality lookup
+
+Fetching a video's available formats/qualities uses `y7dl` directly against
+YouTube's InnerTube API — no API key or OAuth needed, and nothing to
+configure.
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
