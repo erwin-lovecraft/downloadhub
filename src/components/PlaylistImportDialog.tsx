@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePlaylistImport } from "@/hooks/usePlaylistImport";
+import { useSettings } from "@/hooks/useSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,8 +27,19 @@ export function PlaylistImportDialog({
   const [preference, setPreference] = useState<FormatPreference>("best_progressive");
   const [outputPath, setOutputPath] = useState("");
   const { load, importVideos } = usePlaylistImport();
+  const { settings } = useSettings();
 
   const videos = load.data ?? [];
+
+  // Re-seed from settings defaults each time the dialog opens, rather than
+  // on every render, so it doesn't clobber what the user's already picked
+  // while the dialog stays open.
+  useEffect(() => {
+    if (open) {
+      setOutputPath(settings.data?.default_output_path ?? "");
+      setPreference(settings.data?.default_quality ?? "best_progressive");
+    }
+  }, [open, settings.data]);
 
   function handleLoad(e: React.FormEvent) {
     e.preventDefault();

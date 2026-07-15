@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useVideoFormats } from "@/hooks/useVideoFormats";
 import { useQueue } from "@/hooks/useQueue";
+import { useSettings } from "@/hooks/useSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,7 +37,17 @@ export function VideoDetailPanel({
 }) {
   const { data, isLoading, error } = useVideoFormats(videoId);
   const { add } = useQueue();
+  const { settings } = useSettings();
   const [outputPath, setOutputPath] = useState("");
+
+  // Re-seed from the default output folder each time a new video's dialog
+  // opens, rather than on every render, so it doesn't clobber what the
+  // user's already typed while the dialog stays open.
+  useEffect(() => {
+    if (videoId !== null) {
+      setOutputPath(settings.data?.default_output_path ?? "");
+    }
+  }, [videoId, settings.data]);
 
   return (
     <Dialog open={videoId !== null} onOpenChange={(open) => !open && onClose()}>
