@@ -10,10 +10,10 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueueError {
@@ -71,8 +71,9 @@ pub struct QueueEntry {
 }
 
 /// Fields needed to add a new entry; `status`/`id`/`created_at` are assigned
-/// by the store.
-#[derive(Debug, Clone)]
+/// by the store. Serde derives exist because `core::agent` embeds this in a
+/// pending agent action's persisted JSON payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewQueueEntry {
     pub video_id: String,
     pub title: String,
@@ -84,19 +85,31 @@ pub struct NewQueueEntry {
 /// Opens (and owns) the queue's SQLite database. Cheap to clone-and-share
 /// via `Arc` if needed; internally the connection is already behind one.
 pub struct QueueStore {
-    conn: Arc<Mutex<Connection>>,
+    /// `pub(crate)` so `core::agent` can add its own methods on this store
+    /// (its table lives in the same database file).
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl QueueStore {
     /// Opens (creating if missing) the database at `db_path` and ensures
     /// the schema exists. `db_path`'s parent directory must already exist.
+    ///
+    /// The database is opened in WAL mode with a busy timeout: the desktop
+    /// app and the `mcp-server` binary are separate processes sharing this
+    /// same file (see `docs/ARCHITECTURE.md`), and the default rollback
+    /// journal would make one process's write error with `SQLITE_BUSY` the
+    /// instant the other held any lock.
     pub fn open(db_path: &Path) -> Result<Self, QueueError> {
         let conn = Connection::open(db_path)?;
+        // `PRAGMA journal_mode` returns the resulting mode as a row, so it
+        // can't go through `execute_batch`.
+        conn.query_row("PRAGMA journal_mode=WAL", [], |_row| Ok(()))?;
+        conn.busy_timeout(Duration::from_secs(5))?;
         Self::from_connection(conn)
     }
 
     #[cfg(test)]
-    fn open_in_memory() -> Result<Self, QueueError> {
+    pub(crate) fn open_in_memory() -> Result<Self, QueueError> {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
@@ -112,6 +125,15 @@ impl QueueStore {
                 status TEXT NOT NULL,
                 error_message TEXT,
                 created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS pending_agent_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_by TEXT,
+                error_message TEXT,
+                created_at INTEGER NOT NULL,
+                resolved_at INTEGER
             );",
         )?;
         Ok(Self {

@@ -122,7 +122,12 @@ impl YoutubeClient {
                 query.push(("pageToken", token.clone()));
             }
 
-            let response = self.http.get(PLAYLIST_ITEMS_URL).query(&query).send().await?;
+            let response = self
+                .http
+                .get(PLAYLIST_ITEMS_URL)
+                .query(&query)
+                .send()
+                .await?;
             let response: PlaylistItemsResponse = parse_response(response).await?;
 
             for item in response.items {
@@ -154,7 +159,10 @@ impl YoutubeClient {
 
     /// Fills in `duration_seconds` for each result via `videos.list`,
     /// batched (its `id` parameter accepts at most 50 ids per call).
-    async fn enrich_with_durations(&self, results: &mut [VideoSummary]) -> Result<(), YoutubeError> {
+    async fn enrich_with_durations(
+        &self,
+        results: &mut [VideoSummary],
+    ) -> Result<(), YoutubeError> {
         for batch in results.chunks_mut(VIDEOS_BATCH_SIZE) {
             let ids = batch
                 .iter()
@@ -168,7 +176,11 @@ impl YoutubeClient {
             let videos_response = self
                 .http
                 .get(VIDEOS_URL)
-                .query(&[("part", "contentDetails"), ("id", ids.as_str()), ("key", &self.api_key)])
+                .query(&[
+                    ("part", "contentDetails"),
+                    ("id", ids.as_str()),
+                    ("key", &self.api_key),
+                ])
                 .send()
                 .await?;
             let videos_response: VideosListResponse = parse_response(videos_response).await?;

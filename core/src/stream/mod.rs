@@ -102,7 +102,10 @@ pub enum FormatPreference {
 /// Picks the format matching `preference` from an already-fetched list, or
 /// `None` if nothing qualifies. Pure/no I/O so it's unit-testable without a
 /// real video lookup.
-fn select_format(formats: &[FormatSummary], preference: FormatPreference) -> Option<&FormatSummary> {
+fn select_format(
+    formats: &[FormatSummary],
+    preference: FormatPreference,
+) -> Option<&FormatSummary> {
     match preference {
         FormatPreference::BestProgressive => formats
             .iter()
@@ -188,7 +191,13 @@ impl StreamClient {
 mod tests {
     use super::*;
 
-    fn format(itag: u32, has_video: bool, has_audio: bool, height: Option<u32>, bitrate: Option<u64>) -> FormatSummary {
+    fn format(
+        itag: u32,
+        has_video: bool,
+        has_audio: bool,
+        height: Option<u32>,
+        bitrate: Option<u64>,
+    ) -> FormatSummary {
         FormatSummary {
             itag,
             mime_type: "video/mp4".to_string(),

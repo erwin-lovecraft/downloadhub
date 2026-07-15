@@ -71,6 +71,18 @@ pub async fn start_download<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    spawn_download(&app, &state, queue_id).await
+}
+
+/// The guarded spawn behind `start_download`, shared with
+/// `approve_agent_action` (an approved agent `start_download` request must
+/// behave exactly like the user clicking Start: same guards, same
+/// `running_downloads` registry, same progress events).
+pub async fn spawn_download<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    queue_id: i64,
+) -> Result<(), String> {
     state.ensure_no_batch_running()?;
     let store = state.queue_store()?;
 
@@ -158,6 +170,17 @@ pub async fn download_all<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<BatchDownloadOutcome, String> {
+    run_batch_guarded(&app, &state).await
+}
+
+/// The guarded batch run behind `download_all`, shared with
+/// `approve_agent_action` (an approved agent `download_all` request must
+/// behave exactly like the user clicking "Download all", including the
+/// `batch_running` exclusivity guards).
+pub async fn run_batch_guarded<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+) -> Result<BatchDownloadOutcome, String> {
     if state.batch_running.swap(true, Ordering::SeqCst) {
         return Err("A batch download is already in progress.".to_string());
     }
@@ -171,7 +194,7 @@ pub async fn download_all<R: tauri::Runtime>(
         return Err("Wait for the current download to finish before starting a batch.".to_string());
     }
 
-    let outcome = run_batch(&app, &state).await;
+    let outcome = run_batch(app, state).await;
 
     state.batch_running.store(false, Ordering::SeqCst);
     outcome

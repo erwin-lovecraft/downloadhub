@@ -22,11 +22,10 @@ The project is a Cargo workspace with three members:
   — renaming it would require fighting the CLI's config-resolution for no
   functional benefit. It depends on `downloadhub-core` via a path dependency.
 - **`mcp-server/`** (package `downloadhub-mcp-server`, binary `mcp-server`)
-  — Phase 3 binary exposing MCP tools over stdio/socket. Depends on
+  — Phase 3 binary exposing MCP tools over stdio. Depends on
   `downloadhub-core` so it reuses the exact same queue manager and
-  persistence as the desktop app rather than duplicating logic. Currently a
-  stub (`main.rs` just prints a not-yet-implemented notice) — real tool
-  implementations land in Phase 3.
+  persistence as the desktop app rather than duplicating logic. See
+  "Phase 3" below and [`MCP_SETUP.md`](MCP_SETUP.md).
 
 `Cargo.toml` at the repo root is the workspace manifest (`members = ["core",
 "src-tauri", "mcp-server"]`) and defines shared `[workspace.package]` values
@@ -36,17 +35,24 @@ The project is a Cargo workspace with three members:
 Cargo builds the whole workspace to a single `/target/` directory at the
 repo root (not `src-tauri/target/`); the root `.gitignore` accounts for this.
 
-### `app` ↔ `mcp-server` shared state (decide before Phase 3)
+### `app` ↔ `mcp-server` shared state (decided: shared SQLite database)
 
-Both `src-tauri` and `mcp-server` need to operate on the same download
-queue. The plan is for both to depend on `downloadhub-core`'s queue manager
-and share the same SQLite database file rather than one process calling
-into the other over local IPC — this avoids needing either binary to be
-running for the other to make progress, and keeps `downloadhub-core` as the
-single source of truth for queue state and transitions. This decision will
-be revisited and finalized when Phase 3 work starts if a shared-DB approach
-turns out to be insufficient (e.g. if live progress events need to reach the
-MCP client while the desktop app is doing the actual downloading).
+Both `src-tauri` and `mcp-server` operate on the same download queue. Both
+depend on `downloadhub-core`'s queue manager and share the same SQLite
+database file rather than one process calling into the other over local
+IPC — this avoids needing either binary to be running for the other to
+make progress (an agent can file requests while the app is closed; they
+wait), and keeps `downloadhub-core` as the single source of truth for
+queue state and transitions. Finalized in Phase 3: live progress events
+for the MCP client turned out not to be needed, because the MCP server
+never runs downloads at all (see "Pending agent actions" below) — agents
+poll `list_queue` for status, which reads the same rows the app updates.
+
+To make two processes sharing one file safe, `QueueStore::open` puts the
+database in WAL journal mode and sets a 5-second busy timeout; with the
+default rollback journal, one process's write would fail with
+`SQLITE_BUSY` the instant the other held any lock. (`open_in_memory`, used
+by tests, skips this — WAL doesn't apply to in-memory databases.)
 
 ### YouTube Data API client
 
@@ -391,6 +397,78 @@ checks `running_downloads` is empty before starting, closing (though not
 perfectly, given the inherent narrow TOCTOU race in checking then acting on
 two independently-locked pieces of state) the reverse case of a batch
 starting just as an individual download is getting under way.
+
+## Phase 3 (MCP)
+
+### The `mcp-server` binary
+
+Implemented with [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk)
+(the official Rust MCP SDK; MIT-licensed, so compatible with this project's
+GPL obligation) over the stdio transport — MCP clients like Claude Desktop
+spawn local servers as child processes and speak JSON-RPC over
+stdin/stdout, so stdio is the transport that requires zero
+networking/ports/auth setup. Nothing may be printed to stdout (it belongs
+to the protocol); diagnostics go to stderr.
+
+Tool surface (names chosen in Phase 1 to match the queue command names):
+
+- **Read-only, execute directly:** `search_videos` (needs `YOUTUBE_API_KEY`
+  passed via the MCP client's `env` config), `get_video_formats` (no
+  configuration, same `StreamClient` as the app), `list_queue` (reads the
+  shared database).
+- **Queue-mutating, approval-gated:** `add_to_queue`, `start_download`,
+  `download_all`. These never execute in the server process — see below.
+
+Every tool call re-reads `settings.json` and refuses to serve when the
+user has turned off "Allow AI agent access (MCP server)"
+(`AppSettings.mcp_enabled`, default true). Re-reading per call (a tiny
+local file, called at human/agent frequency) means toggling the setting in
+the app takes effect immediately with no restart or cross-process signal.
+
+`add_to_queue` resolves the video itself (`get_video_formats` internally)
+instead of accepting agent-supplied title/quality strings: the itag is
+validated against the video's real format list (failing with the available
+itags listed), and the pending action's title/quality come from YouTube,
+so the approval prompt the user reads describes the actual video rather
+than whatever the agent claimed. `output_path` falls back to the user's
+default output folder from settings.
+
+### Pending agent actions (the approval gate)
+
+Requirement: any tool that mutates the queue or starts a download must not
+execute unattended. Mechanism: a `pending_agent_actions` table in the same
+shared `queue.sqlite3`, managed by `core::agent`. The MCP server's mutating
+tools *only insert a `pending` row* (kind + JSON payload + requesting
+client's self-reported name) and return an `awaiting_user_approval` result;
+the shared database doubles as the request channel, so no IPC between the
+two processes exists at all, and requests filed while the app is closed
+simply wait.
+
+The desktop app polls unresolved actions every 2 seconds
+(`list_pending_agent_actions` command → `AgentActionsPanel` above the
+queue sidebar). Polling rather than events because the writer is another
+process — Tauri's event system can't reach across it, and a filesystem
+watcher on the SQLite file would be both noisier and less portable than a
+2-second `SELECT` against a local database.
+
+Approval (`approve_agent_action`) atomically claims the row with a
+conditional `UPDATE ... WHERE status = 'pending'` (`Pending` → `Approved`),
+so a double-click, a second window, or any other race can never execute
+one action twice — the loser gets an "already approved/rejected" error.
+Execution then goes through the *same guarded helpers the UI's own buttons
+use* (`add_to_queue`'s store insert; `start_download`'s
+`spawn_download`, including the `running_downloads` registry and
+batch-exclusivity guard; `download_all`'s `run_batch_guarded`), and the
+outcome lands back on the row (`Completed`, or `Failed` + message — the
+agent can file a fresh request). `Rejected` rows keep their payload for
+the record but nothing ever executes them. The status machine is
+deliberately one-way: `Pending → Approved → Completed/Failed` or
+`Pending → Rejected`, nothing returns to `Pending`.
+
+`requested_by` is the MCP client's self-reported `clientInfo.name` from
+the initialize handshake — useful display context ("Requested by
+claude-desktop"), but not an authenticated identity, and the UI treats it
+as informational only.
 
 ## License
 

@@ -112,7 +112,10 @@ pub async fn run_all_queued(
     let entries = store.list_entries().await?;
     let mut outcome = BatchDownloadOutcome::default();
 
-    for entry in entries.into_iter().filter(|e| e.status == QueueStatus::Queued) {
+    for entry in entries
+        .into_iter()
+        .filter(|e| e.status == QueueStatus::Queued)
+    {
         let result = run_download(entry.id, stream_client, store, &mut on_progress).await;
         match &result {
             Ok(_) => outcome.completed += 1,

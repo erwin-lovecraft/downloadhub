@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AuthPanel } from "@/components/AuthPanel";
 import { SearchPanel } from "@/components/SearchPanel";
 import { QueuePanel } from "@/components/QueuePanel";
+import { AgentActionsPanel } from "@/components/AgentActionsPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Button } from "@/components/ui/button";
 import { useDownloadProgressListener } from "@/hooks/useDownloadProgressListener";
@@ -29,7 +30,8 @@ function App() {
           <SearchPanel />
         </section>
 
-        <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l pl-6">
+        <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-hidden border-l pl-6">
+          <AgentActionsPanel />
           <QueuePanel />
         </aside>
       </div>
