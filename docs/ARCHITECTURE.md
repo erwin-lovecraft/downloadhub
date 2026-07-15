@@ -172,6 +172,45 @@ here would be building ahead of that step. Likewise, no resume support yet
 (Phase 2: "resumable downloads via range requests") — a failed/interrupted
 download must be restarted from scratch by starting it again.
 
+### Queue controls (cancel/remove/retry)
+
+Cancellation needs to reach into a task already spawned by an earlier
+`start_download` call, so — unlike everything else in `core::download` —
+it's necessarily Tauri-runtime state, not `core` logic: `AppState` holds a
+`Mutex<HashMap<queue_id, tauri::async_runtime::JoinHandle<()>>>` of
+in-flight download tasks, populated by `start_download` and consumed by
+`cancel_download`/`remove_from_queue`. `JoinHandle::abort()` takes `&self`,
+so the map only needs to be locked briefly to look the handle up — no
+ownership juggling.
+
+Aborting a task kills it mid-`.await`, so it never reaches the code in
+`run_download` that would set a terminal `QueueStore` status. `cancel_download`
+therefore sets the entry to `Cancelled` itself after aborting — but only if
+the entry's current status is still `Queued`/`Downloading`, guarding against
+a race where the download actually finished (`Completed`/`Failed`) in the
+brief window between the user clicking Cancel and the command running;
+cancelling shouldn't retroactively overwrite a real outcome.
+
+`remove_from_queue` aborts any running task for that id *before* deleting
+the row, for the same reason `cancel_download` exists at all: without it, a
+still-running download would keep writing to disk after its queue record —
+the only way to see or stop it — was already gone.
+
+"Retry" isn't a separate command: `start_download` already accepts
+`Failed`/`Cancelled` entries (it only rejects a call while the entry is
+already `Downloading`, added alongside this step as a double-start guard),
+so retrying a failed download is exactly the same call as starting a
+queued one — the UI just relabels the button. The `download-progress`
+Tauri event only covers `start_download`'s async lifecycle; `cancel_download`
+and `remove_from_queue` are synchronous commands (they only return once the
+DB/task-registry updates are done), so their mutations invalidate the
+`list_queue` query directly in `onSuccess` rather than needing an event
+round-trip — cancelling additionally clears that queue id's entry from the
+progress Zustand store client-side, since nothing else would (no
+`download-progress` event fires for a cancellation) and a stale
+`status: "downloading"` entry there would otherwise keep the UI showing a
+live progress bar and a Cancel button indefinitely.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save

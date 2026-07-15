@@ -1,5 +1,8 @@
 //! App-wide state read from the environment once at startup.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use downloadhub_core::auth::AuthConfig;
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
@@ -18,6 +21,11 @@ pub struct AppState {
     /// failing to start, matching how a missing API key/OAuth config
     /// degrades rather than panics.
     pub queue_store: Option<QueueStore>,
+    /// Handles for in-flight `start_download` tasks, keyed by queue entry
+    /// id, so `cancel_download`/`remove_from_queue` can abort them. A
+    /// missing entry just means nothing is currently running for that id
+    /// (finished already, or never started).
+    pub running_downloads: Mutex<HashMap<i64, tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -38,7 +46,17 @@ impl AppState {
             youtube_api_key,
             stream_client: StreamClient::new(),
             queue_store: open_queue_store(),
+            running_downloads: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The queue database, or a user-facing error if it couldn't be opened
+    /// at startup. Shared by every command that touches the queue.
+    pub fn queue_store(&self) -> Result<&QueueStore, String> {
+        self.queue_store.as_ref().ok_or_else(|| {
+            "The download queue database is not available (couldn't be opened at startup — check the app's log output)."
+                .to_string()
+        })
     }
 }
 

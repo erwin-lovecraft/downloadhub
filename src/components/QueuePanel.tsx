@@ -18,7 +18,7 @@ function statusClassName(status: QueueStatus): string {
 }
 
 export function QueuePanel() {
-  const { list, start } = useQueue();
+  const { list, start, cancel, remove } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
 
   return (
@@ -46,6 +46,7 @@ export function QueuePanel() {
               ? Math.min(100, Math.round((progress.bytes_written / progress.total_bytes) * 100))
               : null;
           const canStart = entry.status === "queued" || entry.status === "failed" || entry.status === "cancelled";
+          const startLabel = entry.status === "failed" || entry.status === "cancelled" ? "Retry" : "Start";
 
           return (
             <li key={entry.id} className="flex flex-col gap-1 rounded-md border p-2 text-xs">
@@ -53,13 +54,32 @@ export function QueuePanel() {
                 <span className="truncate text-sm font-medium">{entry.title}</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className={statusClassName(entry.status)}>{entry.status}</span>
+                  {isDownloading ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={cancel.isPending}
+                      onClick={() => cancel.mutate(entry.id)}
+                    >
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!canStart || start.isPending}
+                      onClick={() => start.mutate(entry.id)}
+                    >
+                      {startLabel}
+                    </Button>
+                  )}
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={!canStart || start.isPending}
-                    onClick={() => start.mutate(entry.id)}
+                    disabled={isDownloading || remove.isPending}
+                    onClick={() => remove.mutate(entry.id)}
                   >
-                    Start
+                    Remove
                   </Button>
                 </div>
               </div>

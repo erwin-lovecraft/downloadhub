@@ -9,12 +9,6 @@ use crate::state::AppState;
 use downloadhub_core::queue::{NewQueueEntry, QueueEntry};
 use tauri::State;
 
-fn queue_store(state: &AppState) -> Result<&downloadhub_core::queue::QueueStore, String> {
-    state.queue_store.as_ref().ok_or_else(|| {
-        "The download queue database is not available (couldn't be opened at startup — check the app's log output).".to_string()
-    })
-}
-
 #[tauri::command]
 pub async fn add_to_queue(
     video_id: String,
@@ -24,7 +18,8 @@ pub async fn add_to_queue(
     output_path: String,
     state: State<'_, AppState>,
 ) -> Result<QueueEntry, String> {
-    queue_store(&state)?
+    state
+        .queue_store()?
         .add_entry(NewQueueEntry {
             video_id,
             title,
@@ -38,8 +33,30 @@ pub async fn add_to_queue(
 
 #[tauri::command]
 pub async fn list_queue(state: State<'_, AppState>) -> Result<Vec<QueueEntry>, String> {
-    queue_store(&state)?
+    state
+        .queue_store()?
         .list_entries()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Removes an entry from the queue. If a download is currently running for
+/// it, that task is aborted first — otherwise it would keep writing to a
+/// file its queue record no longer exists for.
+#[tauri::command]
+pub async fn remove_from_queue(queue_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(handle) = state
+        .running_downloads
+        .lock()
+        .expect("running downloads mutex poisoned")
+        .remove(&queue_id)
+    {
+        handle.abort();
+    }
+
+    state
+        .queue_store()?
+        .delete_entry(queue_id)
         .await
         .map_err(|e| e.to_string())
 }

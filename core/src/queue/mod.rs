@@ -206,6 +206,20 @@ impl QueueStore {
         .await?
     }
 
+    /// Deletes an entry. A no-op (not an error) if it doesn't exist.
+    pub async fn delete_entry(&self, id: i64) -> Result<(), QueueError> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("queue db mutex poisoned");
+            conn.execute(
+                "DELETE FROM queue_entries WHERE id = ?1",
+                rusqlite::params![id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
     /// Lists all entries, most recently added first.
     pub async fn list_entries(&self) -> Result<Vec<QueueEntry>, QueueError> {
         let conn = self.conn.clone();
@@ -299,5 +313,18 @@ mod tests {
         let updated = store.get_entry(added.id).await.unwrap().unwrap();
         assert_eq!(updated.status, QueueStatus::Failed);
         assert_eq!(updated.error_message.as_deref(), Some("network error"));
+    }
+
+    #[tokio::test]
+    async fn delete_entry_removes_it_and_is_a_noop_when_missing() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let added = store.add_entry(new_entry("abc123")).await.unwrap();
+
+        store.delete_entry(added.id).await.unwrap();
+        assert!(store.get_entry(added.id).await.unwrap().is_none());
+        assert_eq!(store.list_entries().await.unwrap().len(), 0);
+
+        // Deleting again (or an id that never existed) is not an error.
+        store.delete_entry(added.id).await.unwrap();
     }
 }
