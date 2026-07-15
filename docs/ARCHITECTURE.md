@@ -66,6 +66,26 @@ result IDs and merges `contentDetails.duration` (ISO 8601, e.g. `PT4M13S`)
 back in via a small hand-rolled parser (`core::youtube::duration`) — not
 worth a dependency for a four-field, well-specified format.
 
+### Video format/quality lookup
+
+`core::stream` wraps `y7dl::Client` (`StreamClient`) behind a
+`get_video_formats(video_id)` call used by the `get_video_formats` Tauri
+command. `y7dl` isn't published to crates.io, so it's pulled in as a `git`
+dependency in `core/Cargo.toml`, pinned to a specific commit (`rev`) rather
+than tracking a branch, so builds stay reproducible.
+
+`y7dl::Video`/`Format` derive `Deserialize` (they're built by parsing
+YouTube's InnerTube response) but not `Serialize`, so they can't cross the
+Tauri IPC boundary directly. `core::stream` maps them into `VideoDetail`/
+`FormatSummary` DTOs that do derive `Serialize`, the same shape-translation
+`core::youtube` already does for `VideoSummary`.
+
+One `StreamClient` is created once in `AppState` and reused for the app's
+lifetime (held in Tauri-managed state, same pattern as the YouTube API key)
+rather than constructed per call: `y7dl::Client` caches parsed player JS and
+pools HTTP connections internally, both of which are wasted if rebuilt on
+every lookup.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save

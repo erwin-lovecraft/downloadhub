@@ -17,3 +17,4 @@ serde_json = "1.0.150"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 url = "2.5.8"
+y7dl = { git = "https://github.com/erwin-lovecraft/y7dl", rev = "a581b51794a0a0b388f4d2a3248ecd081d2fc615" }

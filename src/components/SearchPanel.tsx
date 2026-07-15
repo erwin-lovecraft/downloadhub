@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useSearchVideos } from "@/hooks/useSearchVideos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { VideoDetailPanel } from "@/components/VideoDetailPanel";
 import { formatDuration } from "@/lib/format";
 
 export function SearchPanel() {
   const [query, setQuery] = useState("");
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const search = useSearchVideos();
 
   function onSubmit(e: React.FormEvent) {
@@ -47,16 +49,28 @@ export function SearchPanel() {
                 className="h-20 w-32 shrink-0 rounded object-cover"
               />
             )}
-            <div className="flex min-w-0 flex-col justify-center gap-1">
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
               <span className="truncate text-sm font-medium">{video.title}</span>
               <span className="text-xs text-muted-foreground">{video.channel_title}</span>
               <span className="text-xs text-muted-foreground">
                 {formatDuration(video.duration_seconds)}
               </span>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 self-center"
+              onClick={() => setSelectedVideoId(video.video_id)}
+            >
+              View formats
+            </Button>
           </li>
         ))}
       </ul>
+
+      {selectedVideoId && (
+        <VideoDetailPanel videoId={selectedVideoId} onClose={() => setSelectedVideoId(null)} />
+      )}
     </div>
   );
 }

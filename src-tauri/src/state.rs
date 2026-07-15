@@ -1,6 +1,7 @@
 //! App-wide state read from the environment once at startup.
 
 use downloadhub_core::auth::AuthConfig;
+use downloadhub_core::stream::StreamClient;
 
 pub struct AppState {
     /// `None` means `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` weren't set; the app
@@ -8,6 +9,9 @@ pub struct AppState {
     pub auth_config: Option<AuthConfig>,
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
     pub youtube_api_key: Option<String>,
+    /// Reused across format lookups: caches parsed player JS and pools HTTP
+    /// connections internally. Needs no configuration (no API key/OAuth).
+    pub stream_client: StreamClient,
 }
 
 impl AppState {
@@ -26,6 +30,7 @@ impl AppState {
         Self {
             auth_config,
             youtube_api_key,
+            stream_client: StreamClient::new(),
         }
     }
 }

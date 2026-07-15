@@ -12,6 +12,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::auth::auth_logout,
             commands::auth::auth_status,
             commands::youtube::search_videos,
+            commands::video::get_video_formats,
         ])
 }
 
