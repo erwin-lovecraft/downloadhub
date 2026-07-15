@@ -1,0 +1,293 @@
+//! Download orchestrator: executes one queue entry's download through
+//! `StreamClient`, updating its status in `QueueStore` and reporting
+//! progress along the way.
+//!
+//! `y7dl` doesn't mux DASH streams, so a video-only or audio-only format is
+//! saved to its own clearly-labeled file (`<title>.video.<ext>` /
+//! `<title>.audio.<ext>`); a progressive format (both tracks in one stream)
+//! is saved as `<title>.<ext>` — see `docs/ARCHITECTURE.md`. There is no
+//! `Muxer` yet; that's a future extension point, not this module's job.
+//!
+//! This module has no Tauri dependency: progress is reported through a
+//! plain callback so the Tauri layer can wire it to event emission without
+//! `core` knowing anything about Tauri's event system.
+
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+
+use tokio::io::{self, AsyncWrite};
+
+use crate::queue::{QueueError, QueueStatus, QueueStore};
+use crate::stream::{StreamClient, StreamError};
+
+#[derive(Debug, thiserror::Error)]
+pub enum DownloadError {
+    #[error("queue entry {0} not found")]
+    EntryNotFound(i64),
+    #[error("format itag {0} is no longer offered for this video")]
+    FormatNotFound(u32),
+    #[error(transparent)]
+    Stream(#[from] StreamError),
+    #[error(transparent)]
+    Queue(#[from] QueueError),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DownloadProgress {
+    pub queue_id: i64,
+    pub bytes_written: u64,
+    /// 0 when the stream's total size isn't known upfront.
+    pub total_bytes: u64,
+}
+
+/// Runs one queue entry's download to completion, transitioning its status
+/// in `store` (`Downloading` → `Completed`/`Failed`) as it goes.
+/// `on_progress` is throttled internally (~5/sec) so callers can wire it
+/// directly to a UI event emitter without flooding it.
+pub async fn run_download(
+    queue_id: i64,
+    stream_client: &StreamClient,
+    store: &QueueStore,
+    mut on_progress: impl FnMut(DownloadProgress) + Send,
+) -> Result<DownloadProgress, DownloadError> {
+    let entry = store
+        .get_entry(queue_id)
+        .await?
+        .ok_or(DownloadError::EntryNotFound(queue_id))?;
+
+    store
+        .set_status(queue_id, QueueStatus::Downloading, None)
+        .await?;
+
+    let result = download_entry(queue_id, &entry, stream_client, &mut on_progress).await;
+
+    match &result {
+        Ok(progress) => {
+            store
+                .set_status(queue_id, QueueStatus::Completed, None)
+                .await?;
+            on_progress(*progress);
+        }
+        Err(e) => {
+            store
+                .set_status(queue_id, QueueStatus::Failed, Some(&e.to_string()))
+                .await?;
+        }
+    }
+    result
+}
+
+async fn download_entry(
+    queue_id: i64,
+    entry: &crate::queue::QueueEntry,
+    stream_client: &StreamClient,
+    on_progress: &mut impl FnMut(DownloadProgress),
+) -> Result<DownloadProgress, DownloadError> {
+    let video = stream_client.fetch_video(&entry.video_id).await?;
+    let format = video
+        .format_by_itag(entry.itag)
+        .ok_or(DownloadError::FormatNotFound(entry.itag))?;
+    let total_bytes = format.content_length().unwrap_or(0);
+
+    tokio::fs::create_dir_all(&entry.output_path).await?;
+    let dest_path = destination_path(&entry.output_path, &entry.title, format);
+    let mut file = tokio::fs::File::create(&dest_path).await?;
+
+    let mut writer = ProgressWriter {
+        inner: &mut file,
+        queue_id,
+        total_bytes,
+        written: 0,
+        last_emit: Instant::now(),
+        on_progress,
+    };
+    let bytes_written = stream_client.download(&video, format, &mut writer).await?;
+
+    Ok(DownloadProgress {
+        queue_id,
+        bytes_written,
+        total_bytes,
+    })
+}
+
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Wraps a destination writer, invoking `on_progress` (throttled) after
+/// each successful write so callers get incremental progress without
+/// modifying `y7dl` itself.
+struct ProgressWriter<'a, W, F> {
+    inner: W,
+    queue_id: i64,
+    total_bytes: u64,
+    written: u64,
+    last_emit: Instant,
+    on_progress: &'a mut F,
+}
+
+impl<W, F> AsyncWrite for ProgressWriter<'_, W, F>
+where
+    W: AsyncWrite + Unpin,
+    F: FnMut(DownloadProgress),
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let poll = Pin::new(&mut this.inner).poll_write(cx, buf);
+        if let Poll::Ready(Ok(n)) = &poll {
+            this.written += *n as u64;
+            let now = Instant::now();
+            if now.duration_since(this.last_emit) >= PROGRESS_EMIT_INTERVAL {
+                this.last_emit = now;
+                (this.on_progress)(DownloadProgress {
+                    queue_id: this.queue_id,
+                    bytes_written: this.written,
+                    total_bytes: this.total_bytes,
+                });
+            }
+        }
+        poll
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+fn destination_path(output_folder: &str, title: &str, format: &y7dl::Format) -> PathBuf {
+    let suffix = if format.is_video() && format.has_audio() {
+        ""
+    } else if format.is_video() {
+        ".video"
+    } else {
+        ".audio"
+    };
+    let ext = extension_for(&format.mime_type);
+    let mut path = PathBuf::from(output_folder);
+    path.push(format!("{}{suffix}.{ext}", sanitize_filename(title)));
+    path
+}
+
+/// Maps a format's mime type (e.g. `video/mp4; codecs="avc1..."`) to a file
+/// extension. Falls back to `bin` for anything unrecognized rather than
+/// guessing.
+fn extension_for(mime_type: &str) -> &'static str {
+    match mime_type.split(';').next().unwrap_or(mime_type).trim() {
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "audio/mp4" => "m4a",
+        "audio/webm" => "webm",
+        _ => "bin",
+    }
+}
+
+/// Strips characters invalid in Windows/Unix filenames and caps length well
+/// under any filesystem's path-component limit.
+fn sanitize_filename(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if "<>:\"/\\|?*".contains(c) || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    let truncated: String = trimmed.chars().take(150).collect();
+    if truncated.is_empty() || truncated.chars().all(|c| c == '_') {
+        "video".to_string()
+    } else {
+        truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_replaces_invalid_characters() {
+        assert_eq!(
+            sanitize_filename("a/b\\c:d*e?f\"g<h>i|j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
+    }
+
+    #[test]
+    fn sanitize_filename_falls_back_when_empty() {
+        assert_eq!(sanitize_filename("   "), "video");
+        assert_eq!(sanitize_filename("///"), "video");
+    }
+
+    #[test]
+    fn sanitize_filename_truncates_long_titles() {
+        let long = "a".repeat(300);
+        assert_eq!(sanitize_filename(&long).len(), 150);
+    }
+
+    #[test]
+    fn extension_for_maps_known_mime_types() {
+        assert_eq!(extension_for(r#"video/mp4; codecs="avc1.42001E""#), "mp4");
+        assert_eq!(extension_for(r#"video/webm; codecs="vp9""#), "webm");
+        assert_eq!(extension_for(r#"audio/mp4; codecs="mp4a.40.2""#), "m4a");
+        assert_eq!(extension_for(r#"audio/webm; codecs="opus""#), "webm");
+        assert_eq!(extension_for("application/octet-stream"), "bin");
+    }
+
+    fn format(mime_type: &str, audio_quality: Option<&str>) -> y7dl::Format {
+        y7dl::Format {
+            itag: 0,
+            url: None,
+            mime_type: mime_type.to_string(),
+            bitrate: None,
+            average_bitrate: None,
+            width: None,
+            height: None,
+            fps: None,
+            content_length: None,
+            quality: None,
+            quality_label: None,
+            audio_quality: audio_quality.map(str::to_string),
+            audio_sample_rate: None,
+            audio_channels: None,
+            approx_duration_ms: None,
+            signature_cipher: None,
+        }
+    }
+
+    #[test]
+    fn destination_path_is_bare_for_progressive_formats() {
+        let f = format("video/mp4; codecs=\"avc1\"", Some("AUDIO_QUALITY_MEDIUM"));
+        let path = destination_path("C:/out", "My Title", &f);
+        assert_eq!(path, PathBuf::from("C:/out").join("My Title.mp4"));
+    }
+
+    #[test]
+    fn destination_path_labels_video_only_formats() {
+        let f = format("video/webm; codecs=\"vp9\"", None);
+        let path = destination_path("C:/out", "My Title", &f);
+        assert_eq!(path, PathBuf::from("C:/out").join("My Title.video.webm"));
+    }
+
+    #[test]
+    fn destination_path_labels_audio_only_formats() {
+        let f = format(
+            "audio/mp4; codecs=\"mp4a.40.2\"",
+            Some("AUDIO_QUALITY_MEDIUM"),
+        );
+        let path = destination_path("C:/out", "My Title", &f);
+        assert_eq!(path, PathBuf::from("C:/out").join("My Title.audio.m4a"));
+    }
+}

@@ -157,6 +157,55 @@ impl QueueStore {
         .await?
     }
 
+    /// Looks up a single entry by id, if it exists.
+    pub async fn get_entry(&self, id: i64) -> Result<Option<QueueEntry>, QueueError> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("queue db mutex poisoned");
+            let mut stmt = conn.prepare(
+                "SELECT id, video_id, title, itag, quality_label, output_path, status, error_message, created_at
+                 FROM queue_entries WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query(rusqlite::params![id])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(QueueEntry {
+                    id: row.get(0)?,
+                    video_id: row.get(1)?,
+                    title: row.get(2)?,
+                    itag: row.get(3)?,
+                    quality_label: row.get(4)?,
+                    output_path: row.get(5)?,
+                    status: QueueStatus::from_str(&row.get::<_, String>(6)?),
+                    error_message: row.get(7)?,
+                    created_at: row.get(8)?,
+                })),
+                None => Ok(None),
+            }
+        })
+        .await?
+    }
+
+    /// Updates an entry's status (and clears/sets its error message).
+    pub async fn set_status(
+        &self,
+        id: i64,
+        status: QueueStatus,
+        error_message: Option<&str>,
+    ) -> Result<(), QueueError> {
+        let conn = self.conn.clone();
+        let status = status.as_str();
+        let error_message = error_message.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("queue db mutex poisoned");
+            conn.execute(
+                "UPDATE queue_entries SET status = ?1, error_message = ?2 WHERE id = ?3",
+                rusqlite::params![status, error_message, id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
     /// Lists all entries, most recently added first.
     pub async fn list_entries(&self) -> Result<Vec<QueueEntry>, QueueError> {
         let conn = self.conn.clone();
@@ -223,5 +272,32 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].video_id, "second");
         assert_eq!(listed[1].video_id, "first");
+    }
+
+    #[tokio::test]
+    async fn get_entry_finds_by_id_and_none_when_missing() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let added = store.add_entry(new_entry("abc123")).await.unwrap();
+
+        let found = store.get_entry(added.id).await.unwrap();
+        assert_eq!(found.unwrap().video_id, "abc123");
+
+        let missing = store.get_entry(added.id + 1).await.unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_status_updates_status_and_error_message() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let added = store.add_entry(new_entry("abc123")).await.unwrap();
+
+        store
+            .set_status(added.id, QueueStatus::Failed, Some("network error"))
+            .await
+            .unwrap();
+
+        let updated = store.get_entry(added.id).await.unwrap().unwrap();
+        assert_eq!(updated.status, QueueStatus::Failed);
+        assert_eq!(updated.error_message.as_deref(), Some("network error"));
     }
 }

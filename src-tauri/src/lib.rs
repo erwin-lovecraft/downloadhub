@@ -16,6 +16,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::video::get_video_formats,
             commands::queue::add_to_queue,
             commands::queue::list_queue,
+            commands::download::start_download,
         ])
 }
 

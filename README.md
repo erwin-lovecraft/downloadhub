@@ -64,6 +64,12 @@ its parent directory are created automatically on first run. The output
 folder for each entry can be typed directly or picked via the native
 folder dialog ("Browse..." next to the field).
 
+Each queued entry has a "Start" button that downloads it via `y7dl`'s
+ranged `Range`-request chunking, with a live progress bar streamed from the
+backend. No config needed. A DASH (adaptive) format saves as
+`<title>.video.<ext>` and/or `<title>.audio.<ext>` in the output folder
+(no muxing yet); a progressive format saves as a single `<title>.<ext>`.
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
