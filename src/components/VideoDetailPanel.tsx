@@ -4,6 +4,7 @@ import { useQueue } from "@/hooks/useQueue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatBytes, formatDuration } from "@/lib/format";
+import { pickOutputFolder } from "@/lib/dialog";
 import type { FormatSummary } from "@/lib/video";
 
 function formatLabel(format: FormatSummary): string {
@@ -49,11 +50,25 @@ export function VideoDetailPanel({ videoId, onClose }: { videoId: string; onClos
             Duration: {formatDuration(data.duration_seconds)}
           </span>
 
-          <Input
-            value={outputPath}
-            onChange={(e) => setOutputPath(e.target.value)}
-            placeholder="Output file path (e.g. C:\Downloads\video.mp4)"
-          />
+          <div className="flex gap-2">
+            <Input
+              value={outputPath}
+              onChange={(e) => setOutputPath(e.target.value)}
+              placeholder="Output folder (e.g. C:\Downloads)"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={async () => {
+                const folder = await pickOutputFolder();
+                if (folder) setOutputPath(folder);
+              }}
+            >
+              Browse...
+            </Button>
+          </div>
           {add.error && (
             <p className="text-sm text-destructive">
               {add.error instanceof Error ? add.error.message : String(add.error)}
