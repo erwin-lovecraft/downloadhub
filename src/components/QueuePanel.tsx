@@ -18,12 +18,38 @@ function statusClassName(status: QueueStatus): string {
 }
 
 export function QueuePanel() {
-  const { list, start, cancel, remove } = useQueue();
+  const { list, start, cancel, remove, downloadAll } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
+
+  const hasQueued = list.data?.some((entry) => entry.status === "queued") ?? false;
+  const batchRunning = downloadAll.isPending;
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <span className="shrink-0 text-sm font-medium">Download queue</span>
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <span className="text-sm font-medium">Download queue</span>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={!hasQueued || batchRunning}
+          onClick={() => downloadAll.mutate()}
+        >
+          {batchRunning ? "Downloading..." : "Download all"}
+        </Button>
+      </div>
+
+      {downloadAll.error && (
+        <p className="shrink-0 text-sm text-destructive">
+          {downloadAll.error instanceof Error ? downloadAll.error.message : String(downloadAll.error)}
+        </p>
+      )}
+
+      {downloadAll.data && !batchRunning && (
+        <p className="shrink-0 text-sm text-muted-foreground">
+          Batch finished: {downloadAll.data.completed} completed
+          {downloadAll.data.failed > 0 ? `, ${downloadAll.data.failed} failed` : ""}.
+        </p>
+      )}
 
       {list.isLoading && (
         <p className="shrink-0 text-sm text-muted-foreground">Loading queue...</p>
@@ -62,7 +88,7 @@ export function QueuePanel() {
                     <Button
                       size="xs"
                       variant="outline"
-                      disabled={cancel.isPending}
+                      disabled={cancel.isPending || batchRunning}
                       onClick={() => cancel.mutate(entry.id)}
                     >
                       Cancel
@@ -71,7 +97,7 @@ export function QueuePanel() {
                     <Button
                       size="xs"
                       variant="outline"
-                      disabled={!canStart || start.isPending}
+                      disabled={!canStart || start.isPending || batchRunning}
                       onClick={() => start.mutate(entry.id)}
                     >
                       {startLabel}
@@ -80,7 +106,7 @@ export function QueuePanel() {
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={isDownloading || remove.isPending}
+                    disabled={isDownloading || remove.isPending || batchRunning}
                     onClick={() => remove.mutate(entry.id)}
                   >
                     Remove

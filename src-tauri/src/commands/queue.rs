@@ -45,6 +45,8 @@ pub async fn list_queue(state: State<'_, AppState>) -> Result<Vec<QueueEntry>, S
 /// file its queue record no longer exists for.
 #[tauri::command]
 pub async fn remove_from_queue(queue_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    state.ensure_no_batch_running()?;
+
     if let Some(handle) = state
         .running_downloads
         .lock()

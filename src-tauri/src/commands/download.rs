@@ -1,13 +1,14 @@
-//! Thin Tauri command handler that starts a queued download in the
-//! background and streams its progress to the frontend as `download-progress`
-//! events. All download logic lives in `downloadhub_core::download`; this
-//! module just spawns it and forwards progress through Tauri's event system
+//! Thin Tauri command handlers that run downloads in the background and
+//! stream progress to the frontend as `download-progress` events. All
+//! download logic lives in `downloadhub_core::download`; this module just
+//! spawns/drives it and forwards progress through Tauri's event system
 //! (which `core` has no dependency on).
 
 use crate::state::AppState;
-use downloadhub_core::download::{self, DownloadProgress};
+use downloadhub_core::download::{self, BatchDownloadOutcome, DownloadProgress};
 use downloadhub_core::queue::QueueStatus;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROGRESS_EVENT: &str = "download-progress";
@@ -70,6 +71,7 @@ pub async fn start_download<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    state.ensure_no_batch_running()?;
     let store = state.queue_store()?;
 
     if let Some(entry) = store.get_entry(queue_id).await.map_err(|e| e.to_string())? {
@@ -121,6 +123,7 @@ pub async fn start_download<R: tauri::Runtime>(
 /// retroactively undo a finished download.
 #[tauri::command]
 pub async fn cancel_download(queue_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    state.ensure_no_batch_running()?;
     let store = state.queue_store()?;
 
     if let Some(handle) = state
@@ -142,4 +145,62 @@ pub async fn cancel_download(queue_id: i64, state: State<'_, AppState>) -> Resul
     }
 
     Ok(())
+}
+
+/// Downloads every currently-`Queued` entry, one at a time, continuing
+/// past a failed entry rather than aborting the batch (`run_all_queued`
+/// already leaves a failed entry `Failed` with its error message, exactly
+/// like an individually-started download that failed). Awaits the whole
+/// batch before returning — progress/per-item completion still stream out
+/// as `download-progress` events throughout, same as `start_download`.
+#[tauri::command]
+pub async fn download_all<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<BatchDownloadOutcome, String> {
+    if state.batch_running.swap(true, Ordering::SeqCst) {
+        return Err("A batch download is already in progress.".to_string());
+    }
+    if !state
+        .running_downloads
+        .lock()
+        .expect("running downloads mutex poisoned")
+        .is_empty()
+    {
+        state.batch_running.store(false, Ordering::SeqCst);
+        return Err("Wait for the current download to finish before starting a batch.".to_string());
+    }
+
+    let outcome = run_batch(&app, &state).await;
+
+    state.batch_running.store(false, Ordering::SeqCst);
+    outcome
+}
+
+async fn run_batch<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+) -> Result<BatchDownloadOutcome, String> {
+    let store = state.queue_store()?;
+    let stream_client = &state.stream_client;
+
+    let progress_app = app.clone();
+    let done_app = app.clone();
+
+    download::run_all_queued(
+        stream_client,
+        store,
+        move |progress| {
+            let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::downloading(progress));
+        },
+        move |queue_id, result| {
+            let event = match result {
+                Ok(progress) => DownloadProgressEvent::completed(progress),
+                Err(e) => DownloadProgressEvent::failed(queue_id, e),
+            };
+            let _ = done_app.emit(PROGRESS_EVENT, event);
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())
 }

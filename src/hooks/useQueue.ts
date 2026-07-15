@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addToQueue, listQueue, removeFromQueue } from "@/lib/queue";
-import { cancelDownload, startDownload } from "@/lib/download";
+import { cancelDownload, downloadAll, startDownload } from "@/lib/download";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 
 export const queueQueryKey = ["queue", "list"] as const;
@@ -29,6 +29,7 @@ export function useQueue() {
     },
   });
   const remove = useMutation({ mutationFn: removeFromQueue, onSuccess: invalidate });
+  const downloadAllMutation = useMutation({ mutationFn: downloadAll, onSuccess: invalidate });
 
-  return { list, add, start, cancel, remove };
+  return { list, add, start, cancel, remove, downloadAll: downloadAllMutation };
 }

@@ -334,6 +334,64 @@ clobber whatever the user's already typed/picked while a dialog stays
 open) — pre-filling rather than forcing, since both flows still let the
 user override per-add.
 
+### Download all (sequential, continue past failures)
+
+Reprioritized ahead of concurrent/resumable downloads at the user's
+explicit request: a "Download all" action that processes every `Queued`
+entry one at a time, continuing to the next entry when one fails rather
+than aborting the batch.
+
+`core::download::run_all_queued` is a thin sequential wrapper around the
+existing `run_download`: list `Queued` entries, call `run_download` for
+each in turn, tally `completed`/`failed` into a `BatchDownloadOutcome`. A
+per-entry failure needs no special handling to "enqueue it again with an
+error message" — `run_download` already leaves a failed entry `Failed`
+with its error message in `QueueStore`, exactly as if it had been started
+individually and failed; the batch loop just doesn't stop there. Only a
+`QueueStore` failure itself (listing entries) stops the batch early, since
+that affects every remaining entry too.
+
+The Tauri `download_all` command takes two callbacks from
+`run_all_queued` — `on_progress` (throttled in-progress updates, same
+callback shape `start_download` already wires to `download-progress`
+events) and a second `on_item_done` fired once per entry after its
+`run_download` call resolves. Without that second callback, only
+`run_all_queued`'s own return value would signal completion — but the
+frontend's `useDownloadProgressListener` reacts to a per-*entry*
+`completed`/`failed` event to clear that entry's progress bar and
+resync its status from SQLite; `on_item_done` lets the command emit
+that same per-entry event for batch-driven downloads as it already does
+for individually-started ones, so the same listener code handles both
+without modification.
+
+Unlike `start_download`, `download_all` doesn't spawn and return
+immediately — it's `async fn download_all(...)` awaiting the whole batch
+directly, so the command only resolves once every entry has been
+attempted. This was a deliberate simplification over the fire-and-forget
+`start_download`/`running_downloads`-registry pattern: it means the
+frontend's mutation `isPending` state already reflects "a batch is
+running" for its true duration with no extra polling or state needed,
+and per-entry `download-progress` events still stream out continuously
+throughout via the callbacks above — nothing about the live progress UI
+requires the command itself to return early.
+
+`AppState.batch_running` (an `AtomicBool`, swapped instead of
+locked-then-set to close the check-then-set race between two concurrent
+`download_all` calls) guards against a second batch starting while one is
+in flight, and `start_download`/`cancel_download`/`remove_from_queue` all
+refuse to run while it's set (`AppState::ensure_no_batch_running`). This
+isn't just "polish" — `download_all` calls `run_download` directly rather
+than through the `running_downloads` abort-handle registry `start_download`
+populates, so an individual command (especially `cancel_download`, which
+would find no handle to abort and might still flip a DB status the batch
+is actively about to overwrite) racing against the batch's own handling of
+the *same* entries has no safe, correct outcome — refusing outright is far
+simpler than trying to reconcile the two. `download_all` additionally
+checks `running_downloads` is empty before starting, closing (though not
+perfectly, given the inherent narrow TOCTOU race in checking then acting on
+two independently-locked pieces of state) the reverse case of a batch
+starting just as an individual download is getting under way.
+
 ## License
 
 This project depends on [`y7dl`](https://github.com/erwin-lovecraft/y7dl)
