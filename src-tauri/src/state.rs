@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use downloadhub_core::auth::AuthConfig;
@@ -31,6 +32,14 @@ pub struct AppState {
     /// missing entry just means nothing is currently running for that id
     /// (finished already, or never started).
     pub running_downloads: Mutex<HashMap<i64, tauri::async_runtime::JoinHandle<()>>>,
+    /// True while `download_all` is sequentially processing the queue.
+    /// `start_download`/`cancel_download`/`remove_from_queue` all refuse to
+    /// run while this is set, since `download_all` calls `run_download`
+    /// directly rather than through the `running_downloads` registry —
+    /// racing an individual command against the batch's own handling of
+    /// the same entries wouldn't be safe (see `docs/ARCHITECTURE.md`,
+    /// "Download all").
+    pub batch_running: AtomicBool,
 }
 
 impl AppState {
@@ -55,6 +64,7 @@ impl AppState {
             queue_store: app_data_dir.as_deref().and_then(open_queue_store),
             settings_path: app_data_dir.map(|dir| dir.join("settings.json")),
             running_downloads: Mutex::new(HashMap::new()),
+            batch_running: AtomicBool::new(false),
         }
     }
 
@@ -84,13 +94,27 @@ impl AppState {
                 .to_string()
         })
     }
+
+    /// Errors out if a `download_all` batch is currently running. Shared by
+    /// every command that individually starts, cancels, or removes a queue
+    /// entry, since those would race with the batch's own handling of the
+    /// same entries.
+    pub fn ensure_no_batch_running(&self) -> Result<(), String> {
+        if self.batch_running.load(std::sync::atomic::Ordering::SeqCst) {
+            Err("A batch download is in progress; wait for it to finish.".to_string())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Resolves (and creates, if missing) `<platform-data-dir>/downloadhub`,
 /// shared by the queue database and settings file. `None` if no data
 /// directory is available at all, or it couldn't be created.
 fn resolve_app_data_dir() -> Option<PathBuf> {
-    let dir = dirs::data_dir().or_else(dirs::home_dir)?.join("downloadhub");
+    let dir = dirs::data_dir()
+        .or_else(dirs::home_dir)?
+        .join("downloadhub");
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("failed to create app data directory {dir:?}: {e}");
         return None;

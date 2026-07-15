@@ -81,6 +81,49 @@ pub async fn run_download(
     result
 }
 
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct BatchDownloadOutcome {
+    pub completed: usize,
+    pub failed: usize,
+}
+
+/// Downloads every currently-`Queued` entry, one at a time (not
+/// concurrently — see `docs/ARCHITECTURE.md`). A per-entry failure is
+/// recorded (`run_download` already leaves the entry `Failed` with its
+/// error message in `store`, exactly as if it had been started
+/// individually and failed) and processing moves on to the next entry
+/// rather than aborting the whole batch. Only a `QueueStore` failure
+/// itself (listing entries) stops the batch early, since that affects
+/// every remaining entry too.
+///
+/// `on_progress` reports throttled in-progress updates, same as
+/// `run_download`. `on_item_done` fires once per entry after its
+/// `run_download` call resolves (`Ok` on success, `Err`'s `to_string()` on
+/// failure — a plain `String` rather than `DownloadError` so callers don't
+/// need to depend on this module's error type just to report it), letting
+/// a caller emit the same per-item completion signal it would for an
+/// individually-started download.
+pub async fn run_all_queued(
+    stream_client: &StreamClient,
+    store: &QueueStore,
+    mut on_progress: impl FnMut(DownloadProgress) + Send,
+    mut on_item_done: impl FnMut(i64, Result<DownloadProgress, String>) + Send,
+) -> Result<BatchDownloadOutcome, QueueError> {
+    let entries = store.list_entries().await?;
+    let mut outcome = BatchDownloadOutcome::default();
+
+    for entry in entries.into_iter().filter(|e| e.status == QueueStatus::Queued) {
+        let result = run_download(entry.id, stream_client, store, &mut on_progress).await;
+        match &result {
+            Ok(_) => outcome.completed += 1,
+            Err(_) => outcome.failed += 1,
+        }
+        on_item_done(entry.id, result.map_err(|e| e.to_string()));
+    }
+
+    Ok(outcome)
+}
+
 async fn download_entry(
     queue_id: i64,
     entry: &crate::queue::QueueEntry,
