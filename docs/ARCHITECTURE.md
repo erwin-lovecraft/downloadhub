@@ -86,6 +86,32 @@ rather than constructed per call: `y7dl::Client` caches parsed player JS and
 pools HTTP connections internally, both of which are wasted if rebuilt on
 every lookup.
 
+### Download queue persistence
+
+`core::queue` (`QueueStore`) persists queue entries to SQLite via
+`rusqlite` with the `bundled` feature, rather than `sqlx`. Queue operations
+are simple single-row CRUD with no need for `sqlx`'s async-native driver or
+compile-time query checking, and `bundled` vendors SQLite's C source
+directly (compiled by `cc`, already a build dependency transitively) so
+there's no system SQLite install to require on any target platform —
+verified by a clean build in this environment. `rusqlite::Connection` is
+blocking, so every `QueueStore` method wraps its work in
+`tokio::task::spawn_blocking` rather than blocking the async runtime
+directly.
+
+The database file lives at `<platform-data-dir>/downloadhub/queue.sqlite3`
+(`dirs::data_dir()`, falling back to `dirs::home_dir()`), resolved and
+opened once in `AppState::from_env` in `src-tauri`, not in `core` itself —
+`core` stays platform-path-agnostic and just takes a `&Path` in
+`QueueStore::open`. If the directory can't be created or the database can't
+be opened, `AppState.queue_store` is `None` and queue commands report that
+rather than the app failing to start, mirroring how a missing
+`YOUTUBE_API_KEY`/OAuth config degrades instead of panicking.
+
+`app` ↔ `mcp-server` shared state (see above) already commits to both
+processes sharing this same SQLite file rather than one calling into the
+other — this module is that shared source of truth.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save

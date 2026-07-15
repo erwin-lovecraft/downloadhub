@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { useVideoFormats } from "@/hooks/useVideoFormats";
+import { useQueue } from "@/hooks/useQueue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatBytes, formatDuration } from "@/lib/format";
 import type { FormatSummary } from "@/lib/video";
 
@@ -18,6 +21,8 @@ function trackLabel(format: FormatSummary): string {
 
 export function VideoDetailPanel({ videoId, onClose }: { videoId: string; onClose: () => void }) {
   const { data, isLoading, error } = useVideoFormats(videoId);
+  const { add } = useQueue();
+  const [outputPath, setOutputPath] = useState("");
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-3 rounded-md border p-3">
@@ -43,6 +48,18 @@ export function VideoDetailPanel({ videoId, onClose }: { videoId: string; onClos
           <span className="text-xs text-muted-foreground">
             Duration: {formatDuration(data.duration_seconds)}
           </span>
+
+          <Input
+            value={outputPath}
+            onChange={(e) => setOutputPath(e.target.value)}
+            placeholder="Output file path (e.g. C:\Downloads\video.mp4)"
+          />
+          {add.error && (
+            <p className="text-sm text-destructive">
+              {add.error instanceof Error ? add.error.message : String(add.error)}
+            </p>
+          )}
+
           <ul className="flex flex-col gap-1">
             {data.formats.map((format) => (
               <li
@@ -57,6 +74,21 @@ export function VideoDetailPanel({ videoId, onClose }: { videoId: string; onClos
                 </span>
                 <span className="text-muted-foreground">{formatBytes(format.content_length_bytes)}</span>
                 <span className="text-muted-foreground">itag {format.itag}</span>
+                <Button
+                  size="xs"
+                  disabled={!outputPath.trim() || add.isPending}
+                  onClick={() =>
+                    add.mutate({
+                      videoId: data.video_id,
+                      title: data.title,
+                      itag: format.itag,
+                      qualityLabel: format.quality_label,
+                      outputPath: outputPath.trim(),
+                    })
+                  }
+                >
+                  Add to queue
+                </Button>
               </li>
             ))}
           </ul>

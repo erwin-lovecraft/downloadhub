@@ -55,6 +55,14 @@ Fetching a video's available formats/qualities uses `y7dl` directly against
 YouTube's InnerTube API — no API key or OAuth needed, and nothing to
 configure.
 
+## Download queue
+
+The queue is a local SQLite database at
+`<platform-data-dir>/downloadhub/queue.sqlite3` (bundled SQLite via
+`rusqlite`, no separate install needed). Nothing to configure; the file and
+its parent directory are created automatically on first run. Output paths
+are entered manually for now — a folder picker lands in a later step.
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
