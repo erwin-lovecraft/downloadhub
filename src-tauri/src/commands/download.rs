@@ -6,6 +6,7 @@
 
 use crate::state::AppState;
 use downloadhub_core::download::{self, DownloadProgress};
+use downloadhub_core::queue::QueueStatus;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -69,32 +70,76 @@ pub async fn start_download<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if state.queue_store.is_none() {
-        return Err(
-            "The download queue database is not available (couldn't be opened at startup — check the app's log output)."
-                .to_string(),
-        );
+    let store = state.queue_store()?;
+
+    if let Some(entry) = store.get_entry(queue_id).await.map_err(|e| e.to_string())? {
+        if entry.status == QueueStatus::Downloading {
+            return Err("This entry is already downloading.".to_string());
+        }
     }
 
-    tauri::async_runtime::spawn(async move {
-        let state = app.state::<AppState>();
+    let task_app = app.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        let state = task_app.state::<AppState>();
         let Some(store) = state.queue_store.as_ref() else {
             return;
         };
         let stream_client = &state.stream_client;
 
-        let progress_app = app.clone();
+        let progress_app = task_app.clone();
         let result = download::run_download(queue_id, stream_client, store, move |progress| {
             let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::downloading(progress));
         })
         .await;
 
+        task_app
+            .state::<AppState>()
+            .running_downloads
+            .lock()
+            .expect("running downloads mutex poisoned")
+            .remove(&queue_id);
+
         let event = match result {
             Ok(progress) => DownloadProgressEvent::completed(progress),
             Err(e) => DownloadProgressEvent::failed(queue_id, e.to_string()),
         };
-        let _ = app.emit(PROGRESS_EVENT, event);
+        let _ = task_app.emit(PROGRESS_EVENT, event);
     });
+
+    state
+        .running_downloads
+        .lock()
+        .expect("running downloads mutex poisoned")
+        .insert(queue_id, handle);
+
+    Ok(())
+}
+
+/// Aborts an in-flight download (if one is running for `queue_id`) and
+/// marks the entry `Cancelled`. A no-op status-wise if the entry already
+/// reached a terminal state (`Completed`/`Failed`) — cancelling doesn't
+/// retroactively undo a finished download.
+#[tauri::command]
+pub async fn cancel_download(queue_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    let store = state.queue_store()?;
+
+    if let Some(handle) = state
+        .running_downloads
+        .lock()
+        .expect("running downloads mutex poisoned")
+        .remove(&queue_id)
+    {
+        handle.abort();
+    }
+
+    if let Some(entry) = store.get_entry(queue_id).await.map_err(|e| e.to_string())? {
+        if matches!(entry.status, QueueStatus::Queued | QueueStatus::Downloading) {
+            store
+                .set_status(queue_id, QueueStatus::Cancelled, None)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
 
     Ok(())
 }

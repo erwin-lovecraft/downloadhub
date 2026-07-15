@@ -26,3 +26,6 @@ export interface AddToQueueParams {
 export const addToQueue = (params: AddToQueueParams) => invoke<QueueEntry>("add_to_queue", params);
 
 export const listQueue = () => invoke<QueueEntry[]>("list_queue");
+
+export const removeFromQueue = (queueId: number) =>
+  invoke<void>("remove_from_queue", { queueId });
