@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addToQueue, listQueue } from "@/lib/queue";
+import { startDownload } from "@/lib/download";
 
 const queueQueryKey = ["queue", "list"] as const;
 
@@ -18,5 +19,12 @@ export function useQueue() {
     },
   });
 
-  return { list, add };
+  const start = useMutation({
+    mutationFn: startDownload,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queueQueryKey });
+    },
+  });
+
+  return { list, add, start };
 }

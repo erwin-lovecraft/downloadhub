@@ -100,7 +100,7 @@ impl StreamClient {
     /// Fetches metadata and the full available format/quality list for a
     /// video URL or bare 11-character ID.
     pub async fn get_video_formats(&self, url_or_id: &str) -> Result<VideoDetail, StreamError> {
-        let video = self.0.get_video(url_or_id).await?;
+        let video = self.fetch_video(url_or_id).await?;
         Ok(VideoDetail {
             video_id: video.id,
             title: video.title,
@@ -108,5 +108,28 @@ impl StreamClient {
             duration_seconds: video.duration.as_secs(),
             formats: video.formats.into_iter().map(FormatSummary::from).collect(),
         })
+    }
+
+    /// Fetches raw `y7dl` video metadata (including formats with their
+    /// stream URLs) for a video URL or bare ID. Exposed for `core::download`,
+    /// which needs the raw `y7dl::Format` (stream URL, mime type) rather than
+    /// the IPC-facing `FormatSummary` DTO.
+    pub async fn fetch_video(&self, url_or_id: &str) -> Result<y7dl::Video, StreamError> {
+        Ok(self.0.get_video(url_or_id).await?)
+    }
+
+    /// Downloads `format`'s stream (resolved from a `fetch_video` call, so
+    /// its stream URL is fresh) into `dest` using ranged chunk requests.
+    /// Returns the number of bytes written.
+    pub async fn download<W>(
+        &self,
+        video: &y7dl::Video,
+        format: &y7dl::Format,
+        dest: &mut W,
+    ) -> Result<u64, StreamError>
+    where
+        W: tokio::io::AsyncWrite + Unpin + ?Sized,
+    {
+        Ok(self.0.download(video, format, dest).await?)
     }
 }

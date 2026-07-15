@@ -129,6 +129,49 @@ download orchestrator (a later step) derives filenames from the video title
 and format inside that folder rather than the queue storing a single
 pre-decided filename.
 
+### Ranged download execution and progress events
+
+`core::download` (`run_download`) is the orchestrator: given a queue entry
+id, it re-fetches the video via `StreamClient::fetch_video` (stream URLs
+from InnerTube are time-limited, so a stored URL can't be reused), resolves
+the requested itag, derives the destination filename (see "Muxing
+extension point" below), and streams the format through
+`StreamClient::download` — which is `y7dl::Client::download` itself doing
+the ranged chunk requests; `core::download` doesn't reimplement chunking.
+It also transitions the entry's status in `QueueStore`
+(`Queued`/`Failed` → `Downloading` → `Completed`/`Failed`) as it runs.
+
+Progress reporting is a plain `FnMut(DownloadProgress)` callback, not a
+Tauri event — `core` stays Tauri-agnostic. The callback is invoked from a
+`ProgressWriter`, an `AsyncWrite` wrapper placed between `y7dl`'s chunked
+writes and the destination file; since `y7dl::Client::download` writes
+each network chunk via `AsyncWrite::write_all` (chunks well under the 10 MB
+`Range` request size), wrapping the destination gives fine-grained progress
+without touching `y7dl` itself. The wrapper throttles callback invocations
+to ~5/sec internally (time-based, not chunk-count-based) so any sink —
+Tauri events, a channel, a test spy — gets a bounded rate regardless of
+chunk size.
+
+`src-tauri/src/commands/download.rs`'s `start_download` command is where
+Tauri-specific plumbing lives: it spawns `run_download` on
+`tauri::async_runtime` and returns immediately (the command's `Result` only
+reports whether the download could be *started*, not its outcome), wiring
+the progress callback to `AppHandle::emit("download-progress", ...)`. The
+frontend listens for that event (`useDownloadProgressListener`) and keeps a
+small Zustand store of the latest progress per queue id — Zustand was
+already a declared-but-unused dependency for exactly this kind of
+cross-component transient state, so no new frontend dependency was needed.
+On a terminal event (`completed`/`failed`) the listener invalidates the
+`list_queue` query so the queue panel's persisted status/error message
+(the source of truth) resyncs from SQLite.
+
+Concurrency is intentionally unbounded for now — each `start_download` call
+spawns its own task with no shared limiter. Phase 2 explicitly adds
+"concurrent downloads (configurable limit, default ~3)"; adding a limiter
+here would be building ahead of that step. Likewise, no resume support yet
+(Phase 2: "resumable downloads via range requests") — a failed/interrupted
+download must be restarted from scratch by starting it again.
+
 ### Muxing extension point
 
 No `ffmpeg`/transcoding dependency yet. DASH adaptive downloads save
