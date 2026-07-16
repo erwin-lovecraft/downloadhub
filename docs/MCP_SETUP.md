@@ -26,7 +26,7 @@ cargo build --release -p downloadhub-mcp-server
 ```
 
 The binary lands at `target/release/mcp-server` (`.exe` on Windows).
-Building the whole app installer with the sidecar bundled is `pnpm package`.
+Building the whole app installer with the sidecar bundled is `just release`.
 
 ## 2. Configuration
 

@@ -478,12 +478,12 @@ the binary is guaranteed to match the app version. It's declared as a
 Tauri `externalBin` sidecar (`bundle.externalBin: ["binaries/mcp-server"]`
 in `tauri.conf.json`); `tauri build` embeds `src-tauri/binaries/
 mcp-server-<target-triple>` next to the main app executable in the bundle
-(Tauri strips the triple suffix at bundle time). `scripts/build-sidecar.mjs`
-(run by the `sidecar`/`package` npm scripts, and by `.github/workflows/
-build-windows.yml`) builds `mcp-server` in release and copies it to that
-triple-suffixed path first — Tauri validates the file exists at compile
-time, so it must run before `tauri build`. The staged binaries are
-gitignored build artifacts.
+(Tauri strips the triple suffix at bundle time). The `sidecar` recipe in
+the root `justfile` (a dependency of `just release`, which is also what
+`.github/workflows/build-windows.yml` runs) builds `mcp-server` in release
+and copies it to that triple-suffixed path first — Tauri validates the file
+exists at compile time, so it must run before `tauri build`. The staged
+binaries are gitignored build artifacts.
 
 The app doesn't *spawn* the sidecar itself (so no `tauri-plugin-shell`
 dependency) — external MCP clients like Claude Desktop spawn it by absolute

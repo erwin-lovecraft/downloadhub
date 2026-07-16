@@ -67,10 +67,17 @@ credentials above are resolved in two steps (see
    compiles* is embedded into the binary (`option_env!`). A release build
    with no `.env` present still carries them.
 
-The [`build-windows`](.github/workflows/build-windows.yml) workflow supplies
-these at build time from **GitHub Actions repository secrets** of the same
-names (Settings → Secrets and variables → Actions). No credential is
-committed to the repo.
+Note that `option_env!` reads the **process environment at compile time**,
+not the `.env` file — the [`justfile`](justfile) bridges that gap: `just
+release` (via just's `dotenv-load` setting) exports the workspace-root
+`.env` into the environment before invoking cargo, so a local release build
+embeds your `.env` values with no manual `export`/`$env:` step. Real env
+vars always take precedence over `.env`.
+
+The [`build-windows`](.github/workflows/build-windows.yml) workflow runs the
+same `just release` and supplies the three values as real env vars from
+**GitHub Actions repository secrets** of the same names (Settings → Secrets
+and variables → Actions). No credential is committed to the repo.
 
 > **Note:** embedding is not encryption — the values are recoverable from the
 > shipped binary (e.g. `strings`). For a desktop app this is an accepted
