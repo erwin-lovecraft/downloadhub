@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
+use downloadhub_core::transcode::Transcoder;
 
 pub struct AppState {
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
@@ -87,6 +88,30 @@ impl AppState {
         })
     }
 
+    /// Resolves the ffmpeg wrapper for MP3 conversion, re-read on every
+    /// download start so a settings change applies without restarting.
+    /// Priority: the custom path from settings, then the bundled sidecar
+    /// next to the app executable (Windows installers ship one), then
+    /// PATH (the dev and macOS fallback). `None` means no ffmpeg found;
+    /// entries flagged for conversion then fail with a clear message.
+    /// A custom path is used as given (not existence-checked here) so a
+    /// wrong one fails the download with an error naming that exact path.
+    pub async fn resolve_transcoder(&self) -> Option<Transcoder> {
+        if let Some(settings_path) = self.settings_path.as_deref() {
+            if let Ok(settings) = downloadhub_core::settings::load(settings_path).await {
+                if let Some(custom) = settings
+                    .ffmpeg_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    return Some(Transcoder::new(custom));
+                }
+            }
+        }
+        find_ffmpeg().map(Transcoder::new)
+    }
+
     /// Errors out if a `download_all` batch is currently running. Shared by
     /// every command that individually starts, cancels, or removes a queue
     /// entry, since those would race with the batch's own handling of the
@@ -98,6 +123,28 @@ impl AppState {
             Ok(())
         }
     }
+}
+
+/// Locates the ffmpeg binary: the bundled sidecar first (Tauri places
+/// `externalBin` entries next to the main executable, same as the
+/// mcp-server sidecar — see `commands::mcp`), then PATH as a dev fallback,
+/// since `tauri dev` doesn't stage sidecars next to the debug binary.
+fn find_ffmpeg() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(candidate) = exe.parent().map(|dir| dir.join(name)) {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|p| p.is_file())
+    })
 }
 
 fn open_queue_store(app_data_dir: &Path) -> Option<QueueStore> {

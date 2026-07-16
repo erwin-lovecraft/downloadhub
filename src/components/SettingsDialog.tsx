@@ -10,7 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { pickOutputFolder } from "@/lib/dialog";
+import { pickFile, pickOutputFolder } from "@/lib/dialog";
 import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
 import type { FormatPreference } from "@/lib/playlist";
 
@@ -25,6 +25,7 @@ export function SettingsDialog({
   const [outputPath, setOutputPath] = useState("");
   const [quality, setQuality] = useState<FormatPreference>("best_progressive");
   const [mcpEnabled, setMcpEnabled] = useState(true);
+  const [ffmpegPath, setFfmpegPath] = useState("");
   const [serverPath, setServerPath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -33,6 +34,7 @@ export function SettingsDialog({
       setOutputPath(settings.data.default_output_path ?? "");
       setQuality(settings.data.default_quality);
       setMcpEnabled(settings.data.mcp_enabled);
+      setFfmpegPath(settings.data.ffmpeg_path ?? "");
     }
   }, [settings.data]);
 
@@ -127,6 +129,33 @@ export function SettingsDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">ffmpeg path (MP3 conversion)</label>
+              <div className="flex gap-2">
+                <Input
+                  value={ffmpegPath}
+                  onChange={(e) => setFfmpegPath(e.target.value)}
+                  placeholder="e.g. /opt/homebrew/bin/ffmpeg"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={async () => {
+                    const file = await pickFile();
+                    if (file) setFfmpegPath(file);
+                  }}
+                >
+                  Browse...
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave empty to use the bundled ffmpeg (Windows) or one found on
+                PATH. Applies to the next download — no restart needed.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <label className="flex items-center gap-2 text-sm font-medium">
                 <Checkbox
                   checked={mcpEnabled}
@@ -166,6 +195,7 @@ export function SettingsDialog({
                   default_output_path: outputPath.trim() || null,
                   default_quality: quality,
                   mcp_enabled: mcpEnabled,
+                  ffmpeg_path: ffmpegPath.trim() || null,
                 })
               }
             >

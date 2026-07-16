@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQueue } from "@/hooks/useQueue";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/format";
+import { openFolder } from "@/lib/opener";
 import type { QueueStatus } from "@/lib/queue";
 
 function statusClassName(status: QueueStatus): string {
@@ -20,6 +22,7 @@ function statusClassName(status: QueueStatus): string {
 export function QueuePanel() {
   const { list, start, cancel, remove, downloadAll } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
+  const [openFolderError, setOpenFolderError] = useState<string | null>(null);
 
   const hasQueued = list.data?.some((entry) => entry.status === "queued") ?? false;
   const batchRunning = downloadAll.isPending;
@@ -37,6 +40,10 @@ export function QueuePanel() {
           {batchRunning ? "Downloading..." : "Download all"}
         </Button>
       </div>
+
+      {openFolderError && (
+        <p className="shrink-0 text-sm text-destructive">{openFolderError}</p>
+      )}
 
       {downloadAll.error && (
         <p className="shrink-0 text-sm text-destructive">
@@ -68,7 +75,11 @@ export function QueuePanel() {
       <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {list.data?.map((entry) => {
           const progress = progressByQueueId[entry.id];
-          const isDownloading = entry.status === "downloading" || progress?.status === "downloading";
+          const isTranscoding = progress?.status === "transcoding";
+          const isDownloading =
+            entry.status === "downloading" ||
+            progress?.status === "downloading" ||
+            isTranscoding;
           const percent =
             progress && progress.status === "downloading" && progress.total_bytes > 0
               ? Math.min(100, Math.round((progress.bytes_written / progress.total_bytes) * 100))
@@ -98,6 +109,18 @@ export function QueuePanel() {
                     >
                       Cancel
                     </Button>
+                  ) : entry.status === "completed" ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        openFolder(entry.output_path)
+                          .then(() => setOpenFolderError(null))
+                          .catch((err) => setOpenFolderError(String(err)))
+                      }
+                    >
+                      Open in files
+                    </Button>
                   ) : (
                     <Button
                       size="xs"
@@ -119,7 +142,9 @@ export function QueuePanel() {
                 </div>
               </div>
               <span className="text-muted-foreground">
-                {entry.quality_label ?? "audio"} (itag {entry.itag})
+                {entry.convert_to_mp3
+                  ? `mp3 (from itag ${entry.itag})`
+                  : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`}
               </span>
               <span className="truncate text-muted-foreground" title={entry.output_path}>
                 {entry.output_path}
@@ -132,11 +157,13 @@ export function QueuePanel() {
                     </div>
                   )}
                   <span className="text-muted-foreground">
-                    {progress
-                      ? `${formatBytes(progress.bytes_written)}${
-                          progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
-                        }`
-                      : "starting..."}
+                    {isTranscoding
+                      ? "converting to mp3..."
+                      : progress
+                        ? `${formatBytes(progress.bytes_written)}${
+                            progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
+                          }`
+                        : "starting..."}
                   </span>
                 </div>
               )}

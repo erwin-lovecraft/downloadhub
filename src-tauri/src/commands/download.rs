@@ -5,7 +5,9 @@
 //! (which `core` has no dependency on).
 
 use crate::state::AppState;
-use downloadhub_core::download::{self, BatchDownloadOutcome, DownloadProgress};
+use downloadhub_core::download::{
+    self, BatchDownloadOutcome, DownloadContext, DownloadPhase, DownloadProgress,
+};
 use downloadhub_core::queue::QueueStatus;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -17,6 +19,7 @@ const PROGRESS_EVENT: &str = "download-progress";
 #[serde(rename_all = "snake_case")]
 enum DownloadStatusEvent {
     Downloading,
+    Transcoding,
     Completed,
     Failed,
 }
@@ -31,12 +34,15 @@ struct DownloadProgressEvent {
 }
 
 impl DownloadProgressEvent {
-    fn downloading(progress: DownloadProgress) -> Self {
+    fn in_progress(progress: DownloadProgress) -> Self {
         Self {
             queue_id: progress.queue_id,
             bytes_written: progress.bytes_written,
             total_bytes: progress.total_bytes,
-            status: DownloadStatusEvent::Downloading,
+            status: match progress.phase {
+                DownloadPhase::Downloading => DownloadStatusEvent::Downloading,
+                DownloadPhase::Transcoding => DownloadStatusEvent::Transcoding,
+            },
             error_message: None,
         }
     }
@@ -98,11 +104,16 @@ pub async fn spawn_download<R: tauri::Runtime>(
         let Some(store) = state.queue_store.as_ref() else {
             return;
         };
-        let stream_client = &state.stream_client;
+        let transcoder = state.resolve_transcoder().await;
+        let ctx = DownloadContext {
+            stream_client: &state.stream_client,
+            store,
+            transcoder: transcoder.as_ref(),
+        };
 
         let progress_app = task_app.clone();
-        let result = download::run_download(queue_id, stream_client, store, move |progress| {
-            let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::downloading(progress));
+        let result = download::run_download(queue_id, &ctx, move |progress| {
+            let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::in_progress(progress));
         })
         .await;
 
@@ -205,16 +216,20 @@ async fn run_batch<R: tauri::Runtime>(
     state: &AppState,
 ) -> Result<BatchDownloadOutcome, String> {
     let store = state.queue_store()?;
-    let stream_client = &state.stream_client;
+    let transcoder = state.resolve_transcoder().await;
+    let ctx = DownloadContext {
+        stream_client: &state.stream_client,
+        store,
+        transcoder: transcoder.as_ref(),
+    };
 
     let progress_app = app.clone();
     let done_app = app.clone();
 
     download::run_all_queued(
-        stream_client,
-        store,
+        &ctx,
         move |progress| {
-            let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::downloading(progress));
+            let _ = progress_app.emit(PROGRESS_EVENT, DownloadProgressEvent::in_progress(progress));
         },
         move |queue_id, result| {
             let event = match result {

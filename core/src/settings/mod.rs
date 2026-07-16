@@ -35,6 +35,12 @@ pub struct AppSettings {
     /// turns agent access off wholesale.
     #[serde(default = "default_mcp_enabled")]
     pub mcp_enabled: bool,
+    /// Custom path to an ffmpeg binary for MP3 conversion. `None` (the
+    /// default, also for settings files saved before this field existed)
+    /// falls back to the bundled sidecar (Windows) or an ffmpeg on PATH —
+    /// see `AppState::resolve_transcoder` in `src-tauri`.
+    #[serde(default)]
+    pub ffmpeg_path: Option<String>,
 }
 
 fn default_mcp_enabled() -> bool {
@@ -47,6 +53,7 @@ impl Default for AppSettings {
             default_output_path: None,
             default_quality: FormatPreference::default(),
             mcp_enabled: true,
+            ffmpeg_path: None,
         }
     }
 }
@@ -88,6 +95,7 @@ mod tests {
             default_output_path: Some("/tmp/downloads".to_string()),
             default_quality: FormatPreference::BestAudioOnly,
             mcp_enabled: false,
+            ffmpeg_path: Some("/opt/homebrew/bin/ffmpeg".to_string()),
         };
         save(&path, &settings).await.unwrap();
 

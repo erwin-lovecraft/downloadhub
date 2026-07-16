@@ -20,6 +20,12 @@ in turn is built on [`kkdai/youtube`](https://github.com/kkdai/youtube).
 Because of this, the whole project is GPL-licensed; no proprietary/closed
 dependency may be added to any crate that links against `y7dl`.
 
+Windows installers additionally bundle a static GPL build of
+[FFmpeg](https://ffmpeg.org) as a sidecar, used to convert downloaded
+audio to MP3 (see [MP3 conversion](#mp3-conversion-ffmpeg-sidecar)).
+FFmpeg is a trademark of Fabrice Bellard; its GPL license matches this
+project's.
+
 ## YouTube search setup (dev)
 
 Keyword search and playlist import call `search.list`/`videos.list`/
@@ -62,6 +68,30 @@ and variables → Actions). No credential is committed to the repo.
 > shipped binary (e.g. `strings`). For a desktop app this is an accepted
 > tradeoff: the YouTube API key is protected by API/quota restrictions set in
 > the Google Cloud Console rather than by secrecy.
+
+## MP3 conversion (ffmpeg sidecar)
+
+The "Download MP3" button downloads the itag-140 m4a stream and transcodes
+it with an external **ffmpeg**, resolved per download (no restart needed)
+in this order:
+
+1. **Custom path from Settings** — "ffmpeg path (MP3 conversion)" in the
+   Settings dialog. This is the way to enable MP3 on macOS today.
+2. **Bundled sidecar** — Windows installers ship a static GPL build
+   vendored at `tools/ffmpeg-windows-x86_64.exe` (committed rather than
+   fetched by any package manager or build step; `just sidecar` copies it
+   to `src-tauri/binaries/ffmpeg-<triple>.exe`, and
+   [`tauri.windows.conf.json`](src-tauri/tauri.windows.conf.json) adds it
+   to `externalBin` on Windows only). To upgrade ffmpeg, replace the file
+   in `tools/` keeping the name, and commit.
+3. **PATH** — any `ffmpeg` found on PATH (e.g. Homebrew's), the usual dev
+   fallback.
+
+macOS builds deliberately bundle no ffmpeg for now: an unsigned vendored
+binary gets blocked by Gatekeeper, so a previously-vendored macOS binary
+was removed — macOS users point the Settings option at their own ffmpeg
+(e.g. `brew install ffmpeg`) instead. If no ffmpeg is found anywhere, MP3
+entries fail with a clear message while everything else keeps working.
 
 ## Video format/quality lookup
 

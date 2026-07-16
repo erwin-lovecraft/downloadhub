@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type DownloadStatus = "downloading" | "completed" | "failed";
+export type DownloadStatus = "downloading" | "transcoding" | "completed" | "failed";
 
 export interface DownloadProgressEvent {
   queue_id: number;

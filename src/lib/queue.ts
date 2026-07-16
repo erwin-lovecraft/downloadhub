@@ -9,6 +9,7 @@ export interface QueueEntry {
   itag: number;
   quality_label: string | null;
   output_path: string;
+  convert_to_mp3: boolean;
   status: QueueStatus;
   error_message: string | null;
   created_at: number;
@@ -20,6 +21,7 @@ export interface AddToQueueParams {
   itag: number;
   qualityLabel: string | null;
   outputPath: string;
+  convertToMp3?: boolean;
   [key: string]: unknown;
 }
 

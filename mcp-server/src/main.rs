@@ -233,6 +233,9 @@ impl DownloadHub {
                     .clone()
                     .or_else(|| format.quality.clone()),
                 output_path,
+                // Agent-proposed entries don't opt into MP3 conversion yet;
+                // the desktop UI is the only writer of this flag.
+                convert_to_mp3: false,
             },
         };
         self.submit_for_approval(request, &context).await
