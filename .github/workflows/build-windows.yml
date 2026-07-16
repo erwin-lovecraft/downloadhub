@@ -1,8 +1,9 @@
 name: build-windows
 
-# Builds a single Windows installer that bundles both the desktop app and
-# the mcp-server sidecar (`just release` builds the sidecar into
-# src-tauri/binaries, then `tauri build` bundles it inside the installer).
+# On a pushed `v*` tag: build one Windows installer that bundles both the
+# desktop app and the mcp-server sidecar (`just release` builds the sidecar
+# into src-tauri/binaries, then `tauri build` bundles it), publish it as a
+# GitHub Release, then submit/update the winget manifest.
 
 on:
   push:
@@ -30,21 +31,33 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
+      # Caches ~/.cargo (registry + git deps) and target/ for dependencies,
+      # keyed on Cargo.lock + rustc version with restore-keys fallback. This
+      # is the expensive part of a Rust build; workspace crates themselves are
+      # small and rebuilt each run, which is the standard rust-cache tradeoff.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
 
-      # Cache node_modules directly (it's heavy) keyed on the lockfile, so
-      # a run with an unchanged pnpm-lock.yaml skips install entirely.
-      - name: Cache node_modules
-        id: cache-node-modules
+      # Cache the pnpm *store* (content-addressed), NOT node_modules. The
+      # store survives lockfile churn: an exact-key miss still restores the
+      # newest store via restore-keys, and `pnpm install` only fetches the
+      # packages that actually changed, then hard-links the rest. This is why
+      # the old node_modules cache (hard-keyed on the lockfile) never hit when
+      # the lockfile changed often.
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
 
       - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       - run: just release
@@ -67,3 +80,25 @@ jobs:
             target/release/bundle/nsis/*.exe
             target/release/bundle/msi/*.msi
           fail_on_unmatched_files: true
+
+  # Submits/updates the winget manifest for this release. Runs only after the
+  # GitHub Release (with its installer asset) is published, since the action
+  # downloads the installer from the release to compute its SHA256.
+  winget:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: ErwinLovecraft.DownloadHub
+          # Only the NSIS setup .exe, not the .msi.
+          installers-regex: '_x64-setup\.exe$'
+          # PackageVersion is derived from the tag with the leading `v`
+          # stripped (winget-releaser's default). Keep the tag equal to the
+          # version embedded in the installer (package.json / tauri.conf.json)
+          # so Apps & Features and the manifest agree.
+          # Classic PAT with `public_repo` scope (or fine-grained with
+          # contents + pull-requests on your winget-pkgs fork). It forks
+          # microsoft/winget-pkgs under the token owner and opens the PR.
+          token: ${{ secrets.WINGET_TOKEN }}
