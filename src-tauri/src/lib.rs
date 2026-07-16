@@ -6,6 +6,7 @@ use state::AppState;
 fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::from_env())
         .invoke_handler(tauri::generate_handler![
             commands::youtube::search_videos,

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQueue } from "@/hooks/useQueue";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/format";
+import { openFolder } from "@/lib/opener";
 import type { QueueStatus } from "@/lib/queue";
 
 function statusClassName(status: QueueStatus): string {
@@ -20,6 +22,7 @@ function statusClassName(status: QueueStatus): string {
 export function QueuePanel() {
   const { list, start, cancel, remove, downloadAll } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
+  const [openFolderError, setOpenFolderError] = useState<string | null>(null);
 
   const hasQueued = list.data?.some((entry) => entry.status === "queued") ?? false;
   const batchRunning = downloadAll.isPending;
@@ -37,6 +40,10 @@ export function QueuePanel() {
           {batchRunning ? "Downloading..." : "Download all"}
         </Button>
       </div>
+
+      {openFolderError && (
+        <p className="shrink-0 text-sm text-destructive">{openFolderError}</p>
+      )}
 
       {downloadAll.error && (
         <p className="shrink-0 text-sm text-destructive">
@@ -97,6 +104,18 @@ export function QueuePanel() {
                       onClick={() => cancel.mutate(entry.id)}
                     >
                       Cancel
+                    </Button>
+                  ) : entry.status === "completed" ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        openFolder(entry.output_path)
+                          .then(() => setOpenFolderError(null))
+                          .catch((err) => setOpenFolderError(String(err)))
+                      }
+                    >
+                      Open in files
                     </Button>
                   ) : (
                     <Button
