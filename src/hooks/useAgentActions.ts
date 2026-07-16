@@ -39,5 +39,29 @@ export function useAgentActions() {
     onSettled: invalidate,
   });
 
-  return { actions, approve, reject };
+  // Approve several pending actions in one click. Sequential, not parallel:
+  // approving a start_download/download_all awaits execution and is guarded
+  // by the backend's batch/registry locks, so firing them concurrently would
+  // race or be rejected. A single failing action doesn't abort the rest —
+  // failures are collected and surfaced together at the end.
+  const approveAll = useMutation({
+    mutationFn: async (actionIds: number[]) => {
+      const failures: string[] = [];
+      for (const id of actionIds) {
+        try {
+          await approveAgentAction(id);
+        } catch (e) {
+          failures.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(
+          `${failures.length} request${failures.length > 1 ? "s" : ""} failed: ${failures.join("; ")}`
+        );
+      }
+    },
+    onSettled: invalidate,
+  });
+
+  return { actions, approve, reject, approveAll };
 }
