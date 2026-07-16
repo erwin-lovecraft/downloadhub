@@ -5,23 +5,19 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-use downloadhub_core::auth::AuthConfig;
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
 
 pub struct AppState {
-    /// `None` means `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` weren't set; the app
-    /// still runs, login just reports it isn't configured.
-    pub auth_config: Option<AuthConfig>,
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
     pub youtube_api_key: Option<String>,
     /// Reused across format lookups: caches parsed player JS and pools HTTP
-    /// connections internally. Needs no configuration (no API key/OAuth).
+    /// connections internally. Needs no configuration (no API key).
     pub stream_client: StreamClient,
     /// `None` means the queue database couldn't be opened (e.g. no writable
     /// app data directory); queue commands report that instead of the app
-    /// failing to start, matching how a missing API key/OAuth config
-    /// degrades rather than panics.
+    /// failing to start, matching how a missing API key degrades rather
+    /// than panics.
     pub queue_store: Option<QueueStore>,
     /// Where `settings.json` lives, alongside `queue.sqlite3`. `None` for
     /// the same reason `queue_store` can be `None` (no writable app data
@@ -44,26 +40,15 @@ pub struct AppState {
 
 impl AppState {
     pub fn from_env() -> Self {
-        // Credentials resolve from the runtime environment first (a local
-        // `.env` via `dotenvy`), then fall back to values embedded at build
-        // time — see `downloadhub_core::secrets`.
-        let auth_config = match (
-            downloadhub_core::secrets::google_oauth_client_id(),
-            downloadhub_core::secrets::google_oauth_client_secret(),
-        ) {
-            (Some(client_id), Some(client_secret)) => Some(AuthConfig {
-                client_id,
-                client_secret,
-            }),
-            _ => None,
-        };
+        // The API key resolves from the runtime environment first (a local
+        // `.env` via `dotenvy`), then falls back to the value embedded at
+        // build time — see `downloadhub_core::secrets`.
         let youtube_api_key = downloadhub_core::secrets::youtube_api_key();
         // Shared with the mcp-server binary (same queue database and
         // settings file), so resolution lives in core::paths.
         let app_data_dir = downloadhub_core::paths::app_data_dir();
 
         Self {
-            auth_config,
             youtube_api_key,
             stream_client: StreamClient::new(),
             queue_store: app_data_dir.as_deref().and_then(open_queue_store),
