@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { UserMenu } from "@/components/UserMenu";
+import { SettingsIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { SearchPanel } from "@/components/SearchPanel";
 import { QueuePanel } from "@/components/QueuePanel";
 import { AgentActionsPanel } from "@/components/AgentActionsPanel";
@@ -14,7 +15,10 @@ function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b bg-card px-6 py-3">
         <h1 className="text-lg font-semibold">DownloadHub</h1>
-        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
+        <Button variant="ghost" size="sm" className="gap-2" onClick={() => setSettingsOpen(true)}>
+          <SettingsIcon className="size-4" />
+          Settings
+        </Button>
       </header>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

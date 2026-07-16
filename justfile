@@ -2,12 +2,11 @@
 # points; `just --list` shows everything.
 #
 # `dotenv-load` exports the workspace-root `.env` (gitignored) into the
-# environment of every recipe, so the three credentials
-# (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / YOUTUBE_API_KEY) are
-# visible to cargo when it compiles `core` — that is what lets `option_env!`
-# in core/src/secrets.rs embed them into a release binary. Real environment
-# variables (e.g. CI's GitHub Actions secrets) are never overridden by `.env`,
-# and a missing `.env` is not an error (CI has none).
+# environment of every recipe, so `YOUTUBE_API_KEY` is visible to cargo when
+# it compiles `core` — that is what lets `option_env!` in core/src/secrets.rs
+# embed it into a release binary. Real environment variables (e.g. CI's GitHub
+# Actions secrets) are never overridden by `.env`, and a missing `.env` is not
+# an error (CI has none).
 
 set dotenv-load := true
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
