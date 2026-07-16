@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "downloadhub",
-  "version": "0.1.0",
-  "identifier": "io.lovecraft.downloadhub",
+  "version": "1.0.3",
+  "identifier": "io.erwinlovecraft.downloadhub",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
