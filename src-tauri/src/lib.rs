@@ -33,7 +33,12 @@ pub fn run() {
     // present. No-op (and not an error) if the file is missing.
     let _ = dotenvy::dotenv();
 
+    // The updater plugin needs the `plugins.updater` config (pubkey +
+    // endpoints), so it lives here rather than in `configure`, which is also
+    // driven by tests against a mock context that has no such config.
     configure(tauri::Builder::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

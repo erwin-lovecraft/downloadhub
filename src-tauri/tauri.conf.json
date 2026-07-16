@@ -9,6 +9,17 @@
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc5MDQ4QzBERjM4MkMwNUMKUldSY3dJTHpEWXdFZWU0cEtiQThrOVZlRjVER280VjFBVWljK29vY1hpQTc5MEFwVHM3M2xDa04K",
+      "endpoints": [
+        "https://github.com/erwin-lovecraft/downloadhub/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "app": {
     "windows": [
       {
@@ -26,6 +37,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "externalBin": ["binaries/mcp-server"],
     "resources": {
       "../LICENSE": "LICENSE",
