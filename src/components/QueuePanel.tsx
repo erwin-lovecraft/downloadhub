@@ -62,7 +62,7 @@ export function QueuePanel() {
       )}
 
       {list.data && list.data.length === 0 && (
-        <p className="shrink-0 text-sm text-muted-foreground">Queue is empty.</p>
+        <p className="shrink-0 text-sm text-muted-foreground">Add some video or audio to queue first.</p>
       )}
 
       <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">

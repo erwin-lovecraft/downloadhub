@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { AuthPanel } from "@/components/AuthPanel";
+import { UserMenu } from "@/components/UserMenu";
 import { SearchPanel } from "@/components/SearchPanel";
 import { QueuePanel } from "@/components/QueuePanel";
 import { AgentActionsPanel } from "@/components/AgentActionsPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
-import { Button } from "@/components/ui/button";
 import { useDownloadProgressListener } from "@/hooks/useDownloadProgressListener";
 
 function App() {
@@ -15,12 +14,7 @@ function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b bg-card px-6 py-3">
         <h1 className="text-lg font-semibold">DownloadHub</h1>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
-            Settings
-          </Button>
-          <AuthPanel />
-        </div>
+        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
       </header>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

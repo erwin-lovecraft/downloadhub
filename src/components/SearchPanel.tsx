@@ -29,9 +29,6 @@ export function SearchPanel() {
         <Button type="submit" disabled={search.isPending || !query.trim()}>
           {search.isPending ? "Searching..." : "Search"}
         </Button>
-        <Button type="button" variant="outline" onClick={() => setPlaylistDialogOpen(true)}>
-          Import playlist
-        </Button>
       </form>
 
       {search.error && (

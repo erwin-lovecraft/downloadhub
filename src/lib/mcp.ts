@@ -14,7 +14,6 @@ export function buildAgentConfig(serverPath: string): string {
       mcpServers: {
         downloadhub: {
           command: serverPath,
-          env: { YOUTUBE_API_KEY: "your-api-key" },
         },
       },
     },
