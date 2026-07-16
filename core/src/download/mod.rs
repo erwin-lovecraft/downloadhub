@@ -38,7 +38,7 @@ pub enum DownloadError {
     FormatNotFound(u32),
     #[error("MP3 conversion needs an audio-only format, but itag {0} has video")]
     NotAudioOnly(u32),
-    #[error("MP3 conversion is unavailable: no ffmpeg binary was found (reinstall the app, or put ffmpeg on PATH)")]
+    #[error("MP3 conversion is unavailable: no ffmpeg binary was found (set an ffmpeg path in Settings, or put ffmpeg on PATH)")]
     TranscoderUnavailable,
     #[error(transparent)]
     Stream(#[from] StreamError),

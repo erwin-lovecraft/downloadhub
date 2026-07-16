@@ -24,11 +24,6 @@ pub struct AppState {
     /// the same reason `queue_store` can be `None` (no writable app data
     /// directory); settings commands report that rather than panicking.
     pub settings_path: Option<PathBuf>,
-    /// ffmpeg wrapper for MP3 conversion. `None` when no ffmpeg binary was
-    /// found (neither the bundled sidecar next to the app executable nor
-    /// one on PATH); entries flagged for conversion then fail with a clear
-    /// message instead of the app refusing to start.
-    pub transcoder: Option<Transcoder>,
     /// Handles for in-flight `start_download` tasks, keyed by queue entry
     /// id, so `cancel_download`/`remove_from_queue` can abort them. A
     /// missing entry just means nothing is currently running for that id
@@ -61,7 +56,6 @@ impl AppState {
             settings_path: app_data_dir
                 .as_deref()
                 .map(downloadhub_core::paths::settings_path),
-            transcoder: find_ffmpeg().map(Transcoder::new),
             running_downloads: Mutex::new(HashMap::new()),
             batch_running: AtomicBool::new(false),
         }
@@ -92,6 +86,30 @@ impl AppState {
             "Settings are not available (no writable app data directory found at startup)."
                 .to_string()
         })
+    }
+
+    /// Resolves the ffmpeg wrapper for MP3 conversion, re-read on every
+    /// download start so a settings change applies without restarting.
+    /// Priority: the custom path from settings, then the bundled sidecar
+    /// next to the app executable (Windows installers ship one), then
+    /// PATH (the dev and macOS fallback). `None` means no ffmpeg found;
+    /// entries flagged for conversion then fail with a clear message.
+    /// A custom path is used as given (not existence-checked here) so a
+    /// wrong one fails the download with an error naming that exact path.
+    pub async fn resolve_transcoder(&self) -> Option<Transcoder> {
+        if let Some(settings_path) = self.settings_path.as_deref() {
+            if let Ok(settings) = downloadhub_core::settings::load(settings_path).await {
+                if let Some(custom) = settings
+                    .ffmpeg_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    return Some(Transcoder::new(custom));
+                }
+            }
+        }
+        find_ffmpeg().map(Transcoder::new)
     }
 
     /// Errors out if a `download_all` batch is currently running. Shared by

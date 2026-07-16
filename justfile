@@ -34,13 +34,14 @@ release: sidecar
 # build` bundles them inside the desktop app — one installer ships
 # everything. mcp-server is built from this workspace; ffmpeg (used for
 # the MP3 transcode step) is a static GPL build vendored in tools/ —
-# deliberately committed binaries rather than a fetch-at-build-time
-# dependency (see README "MP3 conversion (ffmpeg sidecar)"). macOS and
-# Windows only for now; the macOS binary is x86_64 (Rosetta on Apple
-# Silicon).
+# deliberately a committed binary rather than a fetch-at-build-time
+# dependency (see README "MP3 conversion (ffmpeg sidecar)"). Windows only
+# for now (`tauri.windows.conf.json` adds it to `externalBin` there): a
+# vendored unsigned macOS binary gets blocked by Gatekeeper, so macOS
+# relies on the custom ffmpeg path setting or PATH instead.
 
-# Build the mcp-server binary and stage it + the vendored ffmpeg as Tauri
-# sidecars.
+# Build the mcp-server binary and stage it (plus, on Windows, the vendored
+# ffmpeg) as Tauri sidecars.
 [windows]
 sidecar: _build-mcp-server
     New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
@@ -51,7 +52,6 @@ sidecar: _build-mcp-server
 sidecar: _build-mcp-server
     mkdir -p src-tauri/binaries
     cp target/release/mcp-server{{exe}} src-tauri/binaries/mcp-server-{{triple}}{{exe}}
-    cp tools/ffmpeg-macos-x86_64 src-tauri/binaries/ffmpeg-{{triple}}{{exe}}
 
 _build-mcp-server:
     cargo build --release -p downloadhub-mcp-server

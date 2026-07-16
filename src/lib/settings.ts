@@ -6,6 +6,11 @@ export interface AppSettings {
   default_quality: FormatPreference;
   /** Whether the MCP server serves external AI agents (default true). */
   mcp_enabled: boolean;
+  /**
+   * Custom path to an ffmpeg binary for MP3 conversion. null falls back
+   * to the bundled sidecar (Windows) or an ffmpeg found on PATH.
+   */
+  ffmpeg_path: string | null;
 }
 
 export const getSettings = () => invoke<AppSettings>("get_settings");

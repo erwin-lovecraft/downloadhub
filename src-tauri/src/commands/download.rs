@@ -104,10 +104,11 @@ pub async fn spawn_download<R: tauri::Runtime>(
         let Some(store) = state.queue_store.as_ref() else {
             return;
         };
+        let transcoder = state.resolve_transcoder().await;
         let ctx = DownloadContext {
             stream_client: &state.stream_client,
             store,
-            transcoder: state.transcoder.as_ref(),
+            transcoder: transcoder.as_ref(),
         };
 
         let progress_app = task_app.clone();
@@ -215,10 +216,11 @@ async fn run_batch<R: tauri::Runtime>(
     state: &AppState,
 ) -> Result<BatchDownloadOutcome, String> {
     let store = state.queue_store()?;
+    let transcoder = state.resolve_transcoder().await;
     let ctx = DownloadContext {
         stream_client: &state.stream_client,
         store,
-        transcoder: state.transcoder.as_ref(),
+        transcoder: transcoder.as_ref(),
     };
 
     let progress_app = app.clone();
