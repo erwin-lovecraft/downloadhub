@@ -21,10 +21,10 @@ Because of this, the whole project is GPL-licensed; no proprietary/closed
 dependency may be added to any crate that links against `y7dl`.
 
 Installers additionally bundle a static GPL build of
-[FFmpeg](https://ffmpeg.org) (via the pinned
-[`ffmpeg-static`](https://github.com/eugeneware/ffmpeg-static) npm package)
-as a sidecar, used to convert downloaded audio to MP3. FFmpeg is a
-trademark of Fabrice Bellard; its GPL license matches this project's.
+[FFmpeg](https://ffmpeg.org) as a sidecar, used to convert downloaded
+audio to MP3 (see [MP3 conversion](#mp3-conversion-ffmpeg-sidecar)).
+FFmpeg is a trademark of Fabrice Bellard; its GPL license matches this
+project's.
 
 ## YouTube search setup (dev)
 
@@ -68,6 +68,29 @@ and variables → Actions). No credential is committed to the repo.
 > shipped binary (e.g. `strings`). For a desktop app this is an accepted
 > tradeoff: the YouTube API key is protected by API/quota restrictions set in
 > the Google Cloud Console rather than by secrecy.
+
+## MP3 conversion (ffmpeg sidecar)
+
+The "Download MP3" button downloads the itag-140 m4a stream and transcodes
+it with a bundled **ffmpeg** sidecar. The binaries are static GPL builds
+*vendored in the repo* (`tools/`) rather than fetched by any package
+manager or build step:
+
+| Platform | Vendored binary |
+| --- | --- |
+| macOS (x86_64; Rosetta on Apple Silicon) | `tools/ffmpeg-macos-x86_64` |
+| Windows x64 | `tools/ffmpeg-windows-x86_64.exe` |
+
+`just sidecar` (and therefore `just release`, locally and in the
+[`build-windows`](.github/workflows/build-windows.yml) workflow) copies
+the current platform's binary to
+`src-tauri/binaries/ffmpeg-<triple>[.exe]`, where `tauri build` picks it
+up as an `externalBin` sidecar. To upgrade ffmpeg, replace the file in
+`tools/` (keeping the name) and commit.
+
+Under `tauri dev` no sidecar staging happens; the app falls back to any
+`ffmpeg` found on PATH (e.g. Homebrew's), and if none is found, MP3
+entries fail with a clear message while everything else keeps working.
 
 ## Video format/quality lookup
 

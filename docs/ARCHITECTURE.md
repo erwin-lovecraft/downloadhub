@@ -421,11 +421,19 @@ The transcode itself lives in a fourth workspace crate, **`transcode/`**
 an external `ffmpeg` binary (`ffmpeg -i in.m4a -vn -codec:a libmp3lame
 -q:a 2 out.mp3`, LAME VBR ~190 kbps — transparent for a 128 kbps AAC
 source without wasting space on a fixed 320k). ffmpeg is *not* linked as a
-library: a static GPL ffmpeg build (from the pinned `ffmpeg-static` npm
-package, which resolves the right binary per OS/arch at `pnpm install`
-time — macOS and Windows are the supported targets today) is bundled as a
-second Tauri sidecar next to `mcp-server` (`just sidecar` stages both,
-`tauri.conf.json` `externalBin` lists both). `core` depends on the
+library: a static GPL ffmpeg build is bundled as a second Tauri sidecar
+next to `mcp-server` (`tauri.conf.json` `externalBin` lists both). The
+binaries are *vendored in the repo* under `tools/`
+(`ffmpeg-macos-x86_64`, `ffmpeg-windows-x86_64.exe` — macOS and Windows
+are the supported targets today, and the macOS binary is x86_64, running
+under Rosetta on Apple Silicon): `just sidecar` copies the current
+platform's one to `src-tauri/binaries/ffmpeg-<triple>[.exe]`, locally and
+in the `build-windows` CI workflow alike. Committing ~180MB of binaries
+was a deliberate trade against fetch-at-build-time alternatives: an
+earlier iteration used the `ffmpeg-static` npm package purely as a
+download mechanism (nothing in the JS bundle used it), and a
+CI-downloads-from-pinned-URL variant was considered; vendoring keeps
+every build reproducible from a bare checkout with no external fetch. `core` depends on the
 `transcode` crate and re-exports it (`downloadhub_core::transcode`);
 `src-tauri` resolves the ffmpeg path at startup (exe-adjacent sidecar
 first, then PATH as a dev fallback since `tauri dev` doesn't stage
