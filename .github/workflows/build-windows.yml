@@ -1,8 +1,7 @@
 name: build-windows
 
-# Builds a single Windows installer that bundles both the desktop app and
-# the mcp-server sidecar (`just release` builds the sidecar into
-# src-tauri/binaries, then `tauri build` bundles it inside the installer).
+# Builds a Windows installer bundling the desktop app and the mcp-server
+# sidecar, then publishes it as a GitHub Release.
 
 on:
   push:
@@ -11,8 +10,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    # Needed by the release step below to create a GitHub Release and upload
-    # the installer to it.
     permissions:
       contents: write
     steps:
@@ -34,17 +31,21 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      # Cache node_modules directly (it's heavy) keyed on the lockfile, so
-      # a run with an unchanged pnpm-lock.yaml skips install entirely.
-      - name: Cache node_modules
-        id: cache-node-modules
+      # Cache the pnpm store (content-addressed) instead of node_modules, so
+      # a lockfile change only fetches the delta instead of missing entirely.
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Cache pnpm store
         uses: actions/cache@v5
         with:
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
 
       - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       - run: just release
