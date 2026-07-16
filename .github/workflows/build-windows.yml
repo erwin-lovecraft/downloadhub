@@ -28,8 +28,16 @@ jobs:
       - run: npm install
 
       # Builds the mcp-server sidecar, then the Tauri app installer with the
-      # sidecar bundled inside it (one .msi / .exe ships both).
+      # sidecar bundled inside it (one .msi / .exe ships both). The three
+      # credentials are read at compile time by `option_env!` (see
+      # core::secrets) and baked into the binaries, so the shipped installer
+      # needs no .env. Set them as repository secrets in GitHub
+      # (Settings -> Secrets and variables -> Actions).
       - run: npm run package
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
 
       - uses: actions/upload-artifact@v4
         with:

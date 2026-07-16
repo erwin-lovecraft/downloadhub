@@ -91,7 +91,7 @@ impl DownloadHub {
             stream_client: Arc::new(StreamClient::new()),
             queue_store: Arc::new(queue_store),
             settings_path: downloadhub_core::paths::settings_path(&app_data_dir),
-            youtube_api_key: std::env::var("YOUTUBE_API_KEY").ok(),
+            youtube_api_key: downloadhub_core::secrets::youtube_api_key(),
             tool_router: Self::tool_router(),
         })
     }
