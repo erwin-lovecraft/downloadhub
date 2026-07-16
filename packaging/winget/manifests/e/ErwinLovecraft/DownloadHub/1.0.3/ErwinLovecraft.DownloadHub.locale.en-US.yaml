@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+
+PackageIdentifier: ErwinLovecraft.DownloadHub
+PackageVersion: 1.0.3
+PackageLocale: en-US
+Publisher: Erwin Lovecraft
+PublisherUrl: https://github.com/erwin-lovecraft
+PublisherSupportUrl: https://github.com/erwin-lovecraft/downloadhub/issues
+PackageName: DownloadHub
+PackageUrl: https://github.com/erwin-lovecraft/downloadhub
+License: GPL-3.0-or-later
+LicenseUrl: https://github.com/erwin-lovecraft/downloadhub/blob/main/LICENSE
+Copyright: Copyright (c) Erwin Lovecraft
+ShortDescription: An AI-powered YouTube downloader desktop app with search, a download queue, and MCP-based AI agent access.
+Description: >-
+  DownloadHub is a desktop app for searching YouTube, building a download
+  queue (video + format + quality), and downloading videos in chunked,
+  resumable-friendly requests. It also bundles an MCP server so external AI
+  agents (Claude Desktop, Claude Code, Gemini CLI, Codex CLI, and others) can
+  propose playlists and queue downloads, subject to explicit approval in the
+  running app before anything executes.
+Moniker: downloadhub
+Tags:
+  - youtube
+  - downloader
+  - video
+  - tauri
+  - mcp
+  - ai-agent
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0
