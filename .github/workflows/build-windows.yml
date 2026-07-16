@@ -1,7 +1,7 @@
 name: build-windows
 
 # Builds a single Windows installer that bundles both the desktop app and
-# the mcp-server sidecar (`pnpm package` builds the sidecar into
+# the mcp-server sidecar (`npm run package` builds the sidecar into
 # src-tauri/binaries/ first, then `tauri build` embeds it). Run manually or
 # on a version tag; the installer is uploaded as a workflow artifact.
 on:
@@ -15,14 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -30,11 +25,11 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - run: pnpm install --frozen-lockfile
+      - run: npm install
 
       # Builds the mcp-server sidecar, then the Tauri app installer with the
       # sidecar bundled inside it (one .msi / .exe ships both).
-      - run: pnpm package
+      - run: npm run package
 
       - uses: actions/upload-artifact@v4
         with:
