@@ -1,7 +1,7 @@
 name: build-windows
 
 # Builds a single Windows installer that bundles both the desktop app and
-# the mcp-server sidecar (`pnpm package` builds the sidecar into
+# the mcp-server sidecar (`just release` builds the sidecar into
 # src-tauri/binaries, then `tauri build` bundles it inside the installer).
 
 on:
@@ -28,6 +28,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: extractions/setup-just@v3
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -45,7 +47,7 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
-      - run: pnpm package
+      - run: just release
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
