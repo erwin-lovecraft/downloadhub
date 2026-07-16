@@ -1,7 +1,9 @@
 name: build-windows
 
 # Builds a single Windows installer that bundles both the desktop app and
-# the mcp-server sidecar (`npm run package` builds the sidecar into
+# the mcp-server sidecar (`pnpm package` builds the sidecar into
+# src-tauri/binaries, then `tauri build` bundles it inside the installer).
+
 on:
   push:
     tags: ["v*"]
@@ -16,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -26,9 +32,20 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - run: npm install
+      # Cache node_modules directly (it's heavy) keyed on the lockfile, so
+      # a run with an unchanged pnpm-lock.yaml skips install entirely.
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - run: npm run package
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - run: pnpm package
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
