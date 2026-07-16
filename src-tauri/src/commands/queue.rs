@@ -16,6 +16,9 @@ pub async fn add_to_queue(
     itag: u32,
     quality_label: Option<String>,
     output_path: String,
+    // `Option` so existing callers that don't send the field keep working
+    // (Tauri rejects a missing required argument).
+    convert_to_mp3: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<QueueEntry, String> {
     state
@@ -26,6 +29,7 @@ pub async fn add_to_queue(
             itag,
             quality_label,
             output_path,
+            convert_to_mp3: convert_to_mp3.unwrap_or(false),
         })
         .await
         .map_err(|e| e.to_string())

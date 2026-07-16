@@ -10,6 +10,7 @@ name = "downloadhub_core"
 
 [dependencies]
 dirs = "6.0.0"
+downloadhub-transcode = { path = "../transcode" }
 keyring = { version = "4.1.4", features = ["v1"] }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
 reqwest = { version = "0.13.4", features = ["json", "query"] }

@@ -17,6 +17,9 @@
 pub mod agent;
 pub mod auth;
 pub mod download;
+/// Re-export of the `downloadhub-transcode` crate (ffmpeg wrapper), so the
+/// binaries can construct a `Transcoder` without their own Cargo dependency.
+pub use downloadhub_transcode as transcode;
 pub mod paths;
 pub mod playlist;
 pub mod queue;

@@ -64,6 +64,9 @@ pub struct QueueEntry {
     pub itag: u32,
     pub quality_label: Option<String>,
     pub output_path: String,
+    /// Transcode the downloaded audio stream to MP3 (and delete the
+    /// original) once the download finishes — see `core::download`.
+    pub convert_to_mp3: bool,
     pub status: QueueStatus,
     pub error_message: Option<String>,
     /// Unix timestamp (seconds) the entry was added.
@@ -80,6 +83,10 @@ pub struct NewQueueEntry {
     pub itag: u32,
     pub quality_label: Option<String>,
     pub output_path: String,
+    /// `serde(default)` keeps pending agent-action payloads persisted
+    /// before this field existed deserializable (they never convert).
+    #[serde(default)]
+    pub convert_to_mp3: bool,
 }
 
 /// Opens (and owns) the queue's SQLite database. Cheap to clone-and-share
@@ -122,6 +129,7 @@ impl QueueStore {
                 itag INTEGER NOT NULL,
                 quality_label TEXT,
                 output_path TEXT NOT NULL,
+                convert_to_mp3 INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
                 error_message TEXT,
                 created_at INTEGER NOT NULL
@@ -136,6 +144,21 @@ impl QueueStore {
                 resolved_at INTEGER
             );",
         )?;
+        // Databases created before the MP3-conversion feature lack the
+        // column; `CREATE TABLE IF NOT EXISTS` won't add it to an existing
+        // table, so inspect and ALTER.
+        let has_convert_column = conn
+            .prepare("PRAGMA table_info(queue_entries)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "convert_to_mp3");
+        if !has_convert_column {
+            conn.execute(
+                "ALTER TABLE queue_entries ADD COLUMN convert_to_mp3 INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -152,14 +175,15 @@ impl QueueStore {
                 .as_secs() as i64;
             conn.execute(
                 "INSERT INTO queue_entries
-                    (video_id, title, itag, quality_label, output_path, status, error_message, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)",
+                    (video_id, title, itag, quality_label, output_path, convert_to_mp3, status, error_message, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
                 rusqlite::params![
                     entry.video_id,
                     entry.title,
                     entry.itag,
                     entry.quality_label,
                     entry.output_path,
+                    entry.convert_to_mp3,
                     QueueStatus::Queued.as_str(),
                     created_at,
                 ],
@@ -171,6 +195,7 @@ impl QueueStore {
                 itag: entry.itag,
                 quality_label: entry.quality_label,
                 output_path: entry.output_path,
+                convert_to_mp3: entry.convert_to_mp3,
                 status: QueueStatus::Queued,
                 error_message: None,
                 created_at,
@@ -185,7 +210,7 @@ impl QueueStore {
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().expect("queue db mutex poisoned");
             let mut stmt = conn.prepare(
-                "SELECT id, video_id, title, itag, quality_label, output_path, status, error_message, created_at
+                "SELECT id, video_id, title, itag, quality_label, output_path, convert_to_mp3, status, error_message, created_at
                  FROM queue_entries WHERE id = ?1",
             )?;
             let mut rows = stmt.query(rusqlite::params![id])?;
@@ -197,9 +222,10 @@ impl QueueStore {
                     itag: row.get(3)?,
                     quality_label: row.get(4)?,
                     output_path: row.get(5)?,
-                    status: QueueStatus::from_str(&row.get::<_, String>(6)?),
-                    error_message: row.get(7)?,
-                    created_at: row.get(8)?,
+                    convert_to_mp3: row.get(6)?,
+                    status: QueueStatus::from_str(&row.get::<_, String>(7)?),
+                    error_message: row.get(8)?,
+                    created_at: row.get(9)?,
                 })),
                 None => Ok(None),
             }
@@ -248,7 +274,7 @@ impl QueueStore {
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().expect("queue db mutex poisoned");
             let mut stmt = conn.prepare(
-                "SELECT id, video_id, title, itag, quality_label, output_path, status, error_message, created_at
+                "SELECT id, video_id, title, itag, quality_label, output_path, convert_to_mp3, status, error_message, created_at
                  FROM queue_entries ORDER BY created_at DESC, id DESC",
             )?;
             let rows = stmt.query_map([], |row| {
@@ -259,9 +285,10 @@ impl QueueStore {
                     itag: row.get(3)?,
                     quality_label: row.get(4)?,
                     output_path: row.get(5)?,
-                    status: QueueStatus::from_str(&row.get::<_, String>(6)?),
-                    error_message: row.get(7)?,
-                    created_at: row.get(8)?,
+                    convert_to_mp3: row.get(6)?,
+                    status: QueueStatus::from_str(&row.get::<_, String>(7)?),
+                    error_message: row.get(8)?,
+                    created_at: row.get(9)?,
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(QueueError::from)
@@ -281,6 +308,7 @@ mod tests {
             itag: 18,
             quality_label: Some("360p".to_string()),
             output_path: "C:/downloads/test.mp4".to_string(),
+            convert_to_mp3: false,
         }
     }
 
@@ -296,6 +324,55 @@ mod tests {
         assert_eq!(listed[0].video_id, "abc123");
         assert_eq!(listed[0].itag, 18);
         assert_eq!(listed[0].quality_label.as_deref(), Some("360p"));
+    }
+
+    #[tokio::test]
+    async fn convert_to_mp3_flag_roundtrips() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let added = store
+            .add_entry(NewQueueEntry {
+                convert_to_mp3: true,
+                itag: 140,
+                quality_label: None,
+                ..new_entry("abc123")
+            })
+            .await
+            .unwrap();
+        assert!(added.convert_to_mp3);
+
+        let fetched = store.get_entry(added.id).await.unwrap().unwrap();
+        assert!(fetched.convert_to_mp3);
+        assert!(store.list_entries().await.unwrap()[0].convert_to_mp3);
+    }
+
+    #[tokio::test]
+    async fn opening_a_pre_mp3_database_adds_the_column() {
+        // Simulate a database created before the convert_to_mp3 column
+        // existed, then reopen it through the current schema logic.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE queue_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                itag INTEGER NOT NULL,
+                quality_label TEXT,
+                output_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                created_at INTEGER NOT NULL
+            );
+            INSERT INTO queue_entries
+                (video_id, title, itag, quality_label, output_path, status, error_message, created_at)
+             VALUES ('old123', 'Old Entry', 18, '360p', '/tmp', 'queued', NULL, 1);",
+        )
+        .unwrap();
+
+        let store = QueueStore::from_connection(conn).unwrap();
+        let listed = store.list_entries().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].video_id, "old123");
+        assert!(!listed[0].convert_to_mp3);
     }
 
     #[tokio::test]

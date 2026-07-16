@@ -11,9 +11,12 @@ import { PlaylistImportDialog } from "@/components/PlaylistImportDialog";
 import { formatDuration } from "@/lib/format";
 import type { VideoSummary } from "@/lib/youtube";
 
-// itag 139 is the low-bitrate m4a audio-only stream, present on virtually
-// every video, so "Download audio" can skip the format lookup entirely.
-const AUDIO_ITAG = 139;
+// itag 140 is the standard 128 kbps AAC (m4a) audio-only stream, present on
+// virtually every video, so "Download MP3" can skip the format lookup
+// entirely. It's also the best universal source for the MP3 transcode —
+// itag 139 (~48 kbps HE-AAC) would compound its low quality with the
+// lossy-to-lossy conversion.
+const AUDIO_ITAG = 140;
 
 export function SearchPanel() {
   const [query, setQuery] = useState("");
@@ -38,6 +41,7 @@ export function SearchPanel() {
       itag: AUDIO_ITAG,
       qualityLabel: null,
       outputPath,
+      convertToMp3: true,
     });
   }
 
@@ -138,7 +142,7 @@ export function SearchPanel() {
                   disabled={add.isPending}
                   onClick={() => void downloadAudio(video)}
                 >
-                  {isAddingAudio ? "Adding..." : "Download audio"}
+                  {isAddingAudio ? "Adding..." : "Download MP3"}
                 </Button>
               </div>
             </li>

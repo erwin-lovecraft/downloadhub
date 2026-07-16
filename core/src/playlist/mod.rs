@@ -52,6 +52,7 @@ pub async fn import_videos_to_queue(
                         itag: format.itag,
                         quality_label: format.quality_label,
                         output_path: output_path.to_string(),
+                        convert_to_mp3: false,
                     })
                     .await?;
                 added.push(entry);

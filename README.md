@@ -20,6 +20,12 @@ in turn is built on [`kkdai/youtube`](https://github.com/kkdai/youtube).
 Because of this, the whole project is GPL-licensed; no proprietary/closed
 dependency may be added to any crate that links against `y7dl`.
 
+Installers additionally bundle a static GPL build of
+[FFmpeg](https://ffmpeg.org) (via the pinned
+[`ffmpeg-static`](https://github.com/eugeneware/ffmpeg-static) npm package)
+as a sidecar, used to convert downloaded audio to MP3. FFmpeg is a
+trademark of Fabrice Bellard; its GPL license matches this project's.
+
 ## YouTube search setup (dev)
 
 Keyword search and playlist import call `search.list`/`videos.list`/

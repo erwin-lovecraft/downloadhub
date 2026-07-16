@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
+use downloadhub_core::transcode::Transcoder;
 
 pub struct AppState {
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
@@ -23,6 +24,11 @@ pub struct AppState {
     /// the same reason `queue_store` can be `None` (no writable app data
     /// directory); settings commands report that rather than panicking.
     pub settings_path: Option<PathBuf>,
+    /// ffmpeg wrapper for MP3 conversion. `None` when no ffmpeg binary was
+    /// found (neither the bundled sidecar next to the app executable nor
+    /// one on PATH); entries flagged for conversion then fail with a clear
+    /// message instead of the app refusing to start.
+    pub transcoder: Option<Transcoder>,
     /// Handles for in-flight `start_download` tasks, keyed by queue entry
     /// id, so `cancel_download`/`remove_from_queue` can abort them. A
     /// missing entry just means nothing is currently running for that id
@@ -55,6 +61,7 @@ impl AppState {
             settings_path: app_data_dir
                 .as_deref()
                 .map(downloadhub_core::paths::settings_path),
+            transcoder: find_ffmpeg().map(Transcoder::new),
             running_downloads: Mutex::new(HashMap::new()),
             batch_running: AtomicBool::new(false),
         }
@@ -98,6 +105,28 @@ impl AppState {
             Ok(())
         }
     }
+}
+
+/// Locates the ffmpeg binary: the bundled sidecar first (Tauri places
+/// `externalBin` entries next to the main executable, same as the
+/// mcp-server sidecar — see `commands::mcp`), then PATH as a dev fallback,
+/// since `tauri dev` doesn't stage sidecars next to the debug binary.
+fn find_ffmpeg() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(candidate) = exe.parent().map(|dir| dir.join(name)) {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|p| p.is_file())
+    })
 }
 
 fn open_queue_store(app_data_dir: &Path) -> Option<QueueStore> {

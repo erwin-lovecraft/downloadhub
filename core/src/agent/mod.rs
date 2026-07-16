@@ -316,6 +316,7 @@ mod tests {
                 itag: 18,
                 quality_label: Some("360p".to_string()),
                 output_path: "/tmp/downloads".to_string(),
+                convert_to_mp3: false,
             },
         }
     }

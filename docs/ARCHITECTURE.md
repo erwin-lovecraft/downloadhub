@@ -2,7 +2,7 @@
 
 ## Cargo workspace layout
 
-The project is a Cargo workspace with three members:
+The project is a Cargo workspace with four members:
 
 - **`core/`** (package `downloadhub-core`, lib name `downloadhub_core`) — pure
   business logic: YouTube Data API client, `y7dl` wrapper, queue manager,
@@ -21,6 +21,11 @@ The project is a Cargo workspace with three members:
   `-D/--frontend-dist` is documented as relative to `<project-dir>/src-tauri`)
   — renaming it would require fighting the CLI's config-resolution for no
   functional benefit. It depends on `downloadhub-core` via a path dependency.
+- **`transcode/`** (package `downloadhub-transcode`) — audio transcoding
+  via an external `ffmpeg` binary (bundled as a Tauri sidecar; see "MP3
+  download" under Phase 2). A separate crate rather than a `core` module so
+  the process-spawning boundary stays isolated and independently testable;
+  `core` depends on it and re-exports it as `downloadhub_core::transcode`.
 - **`mcp-server/`** (package `downloadhub-mcp-server`, binary `mcp-server`)
   — Phase 3 binary exposing MCP tools over stdio. Depends on
   `downloadhub-core` so it reuses the exact same queue manager and
@@ -28,7 +33,7 @@ The project is a Cargo workspace with three members:
   "Phase 3" below and [`MCP_SETUP.md`](MCP_SETUP.md).
 
 `Cargo.toml` at the repo root is the workspace manifest (`members = ["core",
-"src-tauri", "mcp-server"]`) and defines shared `[workspace.package]` values
+"src-tauri", "mcp-server", "transcode"]`) and defines shared `[workspace.package]` values
 (`version`, `edition`, `license`) that each member inherits with
 `field.workspace = true`.
 
@@ -397,6 +402,55 @@ checks `running_downloads` is empty before starting, closing (though not
 perfectly, given the inherent narrow TOCTOU race in checking then acting on
 two independently-locked pieces of state) the reverse case of a batch
 starting just as an individual download is getting under way.
+
+### MP3 download (transcode via a bundled ffmpeg sidecar)
+
+YouTube serves no MP3 stream, so the "Download MP3" button (one click per
+search result, no format picker) queues the video's **itag 140** stream —
+the standard 128 kbps AAC-LC m4a, present on virtually every video — with a
+`convert_to_mp3` flag on the queue entry (a new SQLite column, added by an
+idempotent `ALTER TABLE` migration for databases created before it existed;
+`NewQueueEntry` deserializes the field with `serde(default)` so pending
+agent-action payloads persisted before the field stay readable). itag 140
+was chosen over itag 139 (~48 kbps HE-AAC) deliberately: MP3 conversion is
+a lossy-to-lossy transcode, so it should start from the best universally
+available audio source rather than compounding 139's low bitrate.
+
+The transcode itself lives in a fourth workspace crate, **`transcode/`**
+(package `downloadhub-transcode`): a thin `tokio::process` wrapper around
+an external `ffmpeg` binary (`ffmpeg -i in.m4a -vn -codec:a libmp3lame
+-q:a 2 out.mp3`, LAME VBR ~190 kbps — transparent for a 128 kbps AAC
+source without wasting space on a fixed 320k). ffmpeg is *not* linked as a
+library: a static GPL ffmpeg build (from the pinned `ffmpeg-static` npm
+package, which resolves the right binary per OS/arch at `pnpm install`
+time — macOS and Windows are the supported targets today) is bundled as a
+second Tauri sidecar next to `mcp-server` (`just sidecar` stages both,
+`tauri.conf.json` `externalBin` lists both). `core` depends on the
+`transcode` crate and re-exports it (`downloadhub_core::transcode`);
+`src-tauri` resolves the ffmpeg path at startup (exe-adjacent sidecar
+first, then PATH as a dev fallback since `tauri dev` doesn't stage
+sidecars) and hands `core::download` a `Transcoder`. The child process is
+spawned with `kill_on_drop`, so cancelling a download mid-transcode kills
+ffmpeg rather than orphaning it.
+
+The conversion is a step *inside* `run_download`, not a separate queue
+state: after the m4a finishes downloading, the entry (still `Downloading`
+in the DB) emits a `Transcoding`-phase progress event (the UI shows
+"converting to mp3..."), ffmpeg writes `<title>.mp3`, and only after a
+successful transcode is the m4a deleted — on failure the entry goes
+`Failed` with ffmpeg's stderr and the m4a is kept so the downloaded data
+isn't lost. Because the transcode is part of `run_download`, "Download
+all" naturally finishes each entry completely (download → transcode →
+delete m4a) before starting the next one. Prerequisites (audio-only
+format, ffmpeg actually present) are validated *before* the download
+starts, so a doomed entry fails without spending bandwidth. The growing
+parameter list this added to `run_download`/`run_all_queued` was folded
+into a `DownloadContext` struct (stream client + store + optional
+transcoder) rather than a fourth positional argument.
+
+MCP-proposed queue entries never set `convert_to_mp3` (the desktop UI is
+the only writer of the flag today); exposing it as a tool parameter is a
+straightforward later addition.
 
 ## Phase 3 (MCP)
 

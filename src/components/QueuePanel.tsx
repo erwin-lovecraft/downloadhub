@@ -75,7 +75,11 @@ export function QueuePanel() {
       <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {list.data?.map((entry) => {
           const progress = progressByQueueId[entry.id];
-          const isDownloading = entry.status === "downloading" || progress?.status === "downloading";
+          const isTranscoding = progress?.status === "transcoding";
+          const isDownloading =
+            entry.status === "downloading" ||
+            progress?.status === "downloading" ||
+            isTranscoding;
           const percent =
             progress && progress.status === "downloading" && progress.total_bytes > 0
               ? Math.min(100, Math.round((progress.bytes_written / progress.total_bytes) * 100))
@@ -138,7 +142,9 @@ export function QueuePanel() {
                 </div>
               </div>
               <span className="text-muted-foreground">
-                {entry.quality_label ?? "audio"} (itag {entry.itag})
+                {entry.convert_to_mp3
+                  ? `mp3 (from itag ${entry.itag})`
+                  : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`}
               </span>
               <span className="truncate text-muted-foreground" title={entry.output_path}>
                 {entry.output_path}
@@ -151,11 +157,13 @@ export function QueuePanel() {
                     </div>
                   )}
                   <span className="text-muted-foreground">
-                    {progress
-                      ? `${formatBytes(progress.bytes_written)}${
-                          progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
-                        }`
-                      : "starting..."}
+                    {isTranscoding
+                      ? "converting to mp3..."
+                      : progress
+                        ? `${formatBytes(progress.bytes_written)}${
+                            progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
+                          }`
+                        : "starting..."}
                   </span>
                 </div>
               )}

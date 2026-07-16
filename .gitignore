@@ -17,7 +17,7 @@ dist-ssr
 /target/
 src-tauri/gen/schemas
 
-# Bundled mcp-server sidecar binaries, produced by scripts/build-sidecar.mjs
+# Bundled sidecar binaries (mcp-server, ffmpeg), staged by `just sidecar`
 src-tauri/binaries/
 
 # Editor directories and files

@@ -38,7 +38,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/mcp-server"],
+    "externalBin": ["binaries/mcp-server", "binaries/ffmpeg"],
     "resources": {
       "../LICENSE": "LICENSE",
       "../README.md": "README.md",
