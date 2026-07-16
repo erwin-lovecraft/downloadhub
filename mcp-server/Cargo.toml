@@ -3,7 +3,7 @@ name = "downloadhub-mcp-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "MCP server exposing the download queue to external AI agents (Phase 3), subject to explicit user approval in the running desktop app."
+description = "MCP server exposing the download queue to external AI agents, subject to explicit user approval in the running desktop app."
 
 [[bin]]
 name = "mcp-server"

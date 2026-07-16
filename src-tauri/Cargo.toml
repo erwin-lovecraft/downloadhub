@@ -1,8 +1,8 @@
 [package]
 name = "downloadhub"
 version.workspace = true
-description = "A Tauri App"
-authors = ["you"]
+description = "An AI-powered YouTube downloader desktop app: log in with Google, search YouTube, build a download queue (video + format + quality), and download videos"
+authors = ["erwin-lovecraft"]
 edition.workspace = true
 license.workspace = true
 
@@ -29,4 +29,3 @@ tauri-plugin-dialog = "2.7.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
-
