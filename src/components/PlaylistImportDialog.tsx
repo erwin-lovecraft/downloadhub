@@ -124,7 +124,7 @@ export function PlaylistImportDialog({
               {videos.map((video) => (
                 <li
                   key={video.video_id}
-                  className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
+                  className="flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs transition-colors hover:bg-muted/50"
                 >
                   <Checkbox
                     checked={selected.has(video.video_id)}

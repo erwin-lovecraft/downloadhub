@@ -17,8 +17,8 @@ export function AgentActionsPanel() {
   if (unresolved.length === 0 && !mutationError) return null;
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 rounded-md border border-amber-500/50 bg-amber-500/5 p-3">
-      <span className="text-sm font-medium">AI agent requests</span>
+    <div className="flex shrink-0 flex-col gap-2 rounded-xl border border-amber-600/40 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+      <span className="text-sm font-semibold">AI agent requests</span>
 
       {mutationError && (
         <p className="text-xs text-destructive">
@@ -31,7 +31,7 @@ export function AgentActionsPanel() {
           const executing = action.status === "approved";
           const busy = approve.isPending || reject.isPending;
           return (
-            <li key={action.id} className="flex flex-col gap-1.5 rounded-md border bg-background p-2 text-xs">
+            <li key={action.id} className="flex flex-col gap-1.5 rounded-lg border bg-card p-2 text-xs shadow-xs">
               <span>{describeAgentAction(action.request)}</span>
               <span className="text-muted-foreground">
                 Requested by {action.requested_by ?? "an MCP client"}

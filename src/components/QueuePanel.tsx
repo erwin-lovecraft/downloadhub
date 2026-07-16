@@ -7,7 +7,7 @@ import type { QueueStatus } from "@/lib/queue";
 function statusClassName(status: QueueStatus): string {
   switch (status) {
     case "completed":
-      return "text-green-600 dark:text-green-400";
+      return "text-success";
     case "failed":
       return "text-destructive";
     case "cancelled":
@@ -27,7 +27,7 @@ export function QueuePanel() {
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <span className="text-sm font-medium">Download queue</span>
+        <span className="text-sm font-semibold">Download queue</span>
         <Button
           size="xs"
           variant="outline"
@@ -77,12 +77,17 @@ export function QueuePanel() {
           const startLabel = entry.status === "failed" || entry.status === "cancelled" ? "Retry" : "Start";
 
           return (
-            <li key={entry.id} className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+            <li
+              key={entry.id}
+              className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-xs shadow-xs"
+            >
               <span className="truncate text-sm font-medium" title={entry.title}>
                 {entry.title}
               </span>
               <div className="flex items-center justify-between gap-2">
-                <span className={statusClassName(entry.status)}>{entry.status}</span>
+                <span className={`font-medium capitalize ${statusClassName(entry.status)}`}>
+                  {entry.status}
+                </span>
                 <div className="flex shrink-0 items-center gap-2">
                   {isDownloading ? (
                     <Button

@@ -100,7 +100,7 @@ export function VideoDetailPanel({
               {data.formats.map((format) => (
                 <li
                   key={format.itag}
-                  className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs"
+                  className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-xs transition-colors hover:bg-muted/50"
                 >
                   <span className="w-14 shrink-0 font-medium">{formatLabel(format)}</span>
                   <span className="w-24 shrink-0 text-muted-foreground">{trackLabel(format)}</span>

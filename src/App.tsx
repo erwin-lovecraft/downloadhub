@@ -13,7 +13,7 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex shrink-0 items-center justify-between border-b px-6 py-3">
+      <header className="flex shrink-0 items-center justify-between border-b bg-card px-6 py-3">
         <h1 className="text-lg font-semibold">DownloadHub</h1>
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
