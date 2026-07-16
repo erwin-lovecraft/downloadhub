@@ -36,6 +36,10 @@ Tokens are stored in the OS keychain via the `keyring` crate, never in a
 plaintext file. Without a `.env`/env vars set, the app still runs — the
 "Sign in with Google" button will just report that OAuth isn't configured.
 
+For **release builds** the credentials don't ship as a `.env` — they're
+baked into the binary at compile time instead. See
+[Release builds](#release-builds-embedded-credentials) below.
+
 ## YouTube search setup (dev)
 
 Keyword search and playlist import call `search.list`/`videos.list`/
@@ -47,7 +51,33 @@ Keyword search and playlist import call `search.list`/`videos.list`/
 2. Set `YOUTUBE_API_KEY` in your `.env` (see [`.env.example`](.env.example)).
 
 Without it set, the app still runs — search reports that it isn't
-configured.
+configured. In release builds this key is embedded at compile time (see
+[Release builds](#release-builds-embedded-credentials)).
+
+## Release builds (embedded credentials)
+
+A shipped installer can't rely on a user-provided `.env`, so the three
+credentials above are resolved in two steps (see
+[`core::secrets`](core/src/secrets.rs)):
+
+1. **Runtime environment first** — a local `.env` (via `dotenvy`) or any real
+   env var. This is what dev uses; nothing changes there.
+2. **Compile-time fallback** — whatever `GOOGLE_OAUTH_CLIENT_ID`,
+   `GOOGLE_OAUTH_CLIENT_SECRET`, and `YOUTUBE_API_KEY` are set to *when cargo
+   compiles* is embedded into the binary (`option_env!`). A release build
+   with no `.env` present still carries them.
+
+The [`build-windows`](.github/workflows/build-windows.yml) workflow supplies
+these at build time from **GitHub Actions repository secrets** of the same
+names (Settings → Secrets and variables → Actions). No credential is
+committed to the repo.
+
+> **Note:** embedding is not encryption — the values are recoverable from the
+> shipped binary (e.g. `strings`). For a desktop app this is an accepted
+> tradeoff: a Google "Desktop app" OAuth client id/secret are not
+> confidential by design ([RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252)),
+> and the YouTube API key is protected by API/quota restrictions set in the
+> Google Cloud Console rather than by secrecy.
 
 ## Video format/quality lookup
 

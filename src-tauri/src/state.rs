@@ -44,17 +44,20 @@ pub struct AppState {
 
 impl AppState {
     pub fn from_env() -> Self {
+        // Credentials resolve from the runtime environment first (a local
+        // `.env` via `dotenvy`), then fall back to values embedded at build
+        // time — see `downloadhub_core::secrets`.
         let auth_config = match (
-            std::env::var("GOOGLE_OAUTH_CLIENT_ID"),
-            std::env::var("GOOGLE_OAUTH_CLIENT_SECRET"),
+            downloadhub_core::secrets::google_oauth_client_id(),
+            downloadhub_core::secrets::google_oauth_client_secret(),
         ) {
-            (Ok(client_id), Ok(client_secret)) => Some(AuthConfig {
+            (Some(client_id), Some(client_secret)) => Some(AuthConfig {
                 client_id,
                 client_secret,
             }),
             _ => None,
         };
-        let youtube_api_key = std::env::var("YOUTUBE_API_KEY").ok();
+        let youtube_api_key = downloadhub_core::secrets::youtube_api_key();
         // Shared with the mcp-server binary (same queue database and
         // settings file), so resolution lives in core::paths.
         let app_data_dir = downloadhub_core::paths::app_data_dir();

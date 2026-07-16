@@ -12,6 +12,7 @@
 //! - `auth`: Google OAuth token acquisition/storage (via `keyring`)
 //! - `agent`: pending agent actions (MCP requests awaiting user approval)
 //! - `paths`: shared app-data-dir resolution for both binaries
+//! - `secrets`: credential resolution (runtime env, then compile-time embed)
 
 pub mod agent;
 pub mod auth;
@@ -19,6 +20,7 @@ pub mod download;
 pub mod paths;
 pub mod playlist;
 pub mod queue;
+pub mod secrets;
 pub mod settings;
 pub mod stream;
 pub mod youtube;
