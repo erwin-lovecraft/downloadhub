@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5CB2FF"/>
+      <stop offset="0.55" stop-color="#1170E0"/>
+      <stop offset="1" stop-color="#0A4CAE"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCEBFF"/>
+    </linearGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+
+    <!-- Hub ring, open at the top so the download drops in -->
+    <path d="M 642 313 A 286 286 0 1 1 382 313"
+          fill="none" stroke="url(#ink)" stroke-width="64" stroke-linecap="round"/>
+
+    <!-- Download arrow -->
+    <path d="M 457 180 H 567 V 480 H 692 L 512 700 L 332 480 H 457 Z"
+          fill="url(#ink)" stroke="url(#ink)" stroke-width="28"
+          stroke-linejoin="round" paint-order="stroke"/>
+
+    <!-- Soft grounding shadow inside the ring -->
+    <ellipse cx="512" cy="880" rx="420" ry="120" fill="#052B66" opacity="0.18"/>
+  </g>
+</svg>
