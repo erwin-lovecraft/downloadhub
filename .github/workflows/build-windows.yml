@@ -48,9 +48,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The two TAURI_SIGNING_* vars make `tauri build` sign the installer and
+      # emit a `.sig` next to it; the updater plugin refuses unsigned updates.
       - run: just release
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # Build the updater manifest the app polls. The .sig is the signature the
+      # installer was signed with; the url points at this tag's release asset.
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          sig_file=$(ls target/release/bundle/nsis/*-setup.exe.sig)
+          exe_name=$(basename "${sig_file%.sig}")
+          jq -n \
+            --arg version "${GITHUB_REF_NAME#v}" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg sig "$(cat "$sig_file")" \
+            --arg url "https://github.com/erwin-lovecraft/downloadhub/releases/download/${GITHUB_REF_NAME}/${exe_name}" \
+            '{version: $version, pub_date: $date, platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' \
+            > latest.json
 
       - uses: actions/upload-artifact@v6
         with:
@@ -67,4 +86,5 @@ jobs:
           files: |
             target/release/bundle/nsis/*.exe
             target/release/bundle/msi/*.msi
+            latest.json
           fail_on_unmatched_files: true
