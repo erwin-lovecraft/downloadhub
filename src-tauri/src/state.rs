@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
-use downloadhub_core::transcode::Transcoder;
+use downloadhub_transcode::Transcoder;
 
 pub struct AppState {
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
@@ -109,7 +109,7 @@ impl AppState {
                 }
             }
         }
-        find_ffmpeg().map(Transcoder::new)
+        downloadhub_transcode::locate_ffmpeg().map(Transcoder::new)
     }
 
     /// Errors out if a `download_all` batch is currently running. Shared by
@@ -123,28 +123,6 @@ impl AppState {
             Ok(())
         }
     }
-}
-
-/// Locates the ffmpeg binary: the bundled sidecar first (Tauri places
-/// `externalBin` entries next to the main executable, same as the
-/// mcp-server sidecar — see `commands::mcp`), then PATH as a dev fallback,
-/// since `tauri dev` doesn't stage sidecars next to the debug binary.
-fn find_ffmpeg() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(candidate) = exe.parent().map(|dir| dir.join(name)) {
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|p| p.is_file())
-    })
 }
 
 fn open_queue_store(app_data_dir: &Path) -> Option<QueueStore> {

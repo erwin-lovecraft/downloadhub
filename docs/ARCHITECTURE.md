@@ -24,8 +24,11 @@ The project is a Cargo workspace with four members:
 - **`transcode/`** (package `downloadhub-transcode`) — audio transcoding
   via an external `ffmpeg` binary (bundled as a Tauri sidecar; see "MP3
   download" under Phase 2). A separate crate rather than a `core` module so
-  the process-spawning boundary stays isolated and independently testable;
-  `core` depends on it and re-exports it as `downloadhub_core::transcode`.
+  the process-spawning boundary stays isolated and independently testable.
+  It depends on `downloadhub-core` and implements `core`'s
+  `download::Transcode` trait (the transcoding seam), so the dependency
+  arrow points the same way as `mcp-server`'s: `core` defines the contract,
+  satellite crates implement it. `core` has no dependency on this crate.
 - **`mcp-server/`** (package `downloadhub-mcp-server`, binary `mcp-server`)
   — Phase 3 binary exposing MCP tools over stdio. Depends on
   `downloadhub-core` so it reuses the exact same queue manager and
@@ -437,11 +440,14 @@ platform-specific config that JSON-merges over `tauri.conf.json` on
 Windows only, so array values there must repeat `binaries/mcp-server`).
 macOS bundles no ffmpeg for now: a vendored unsigned binary gets blocked
 by Gatekeeper, so the previously-vendored macOS binary was removed and
-macOS users set the settings option (or rely on PATH) instead. `core` depends on the
-`transcode` crate and re-exports it (`downloadhub_core::transcode`);
-`src-tauri` resolves the ffmpeg path at startup (exe-adjacent sidecar
-first, then PATH as a dev fallback since `tauri dev` doesn't stage
-sidecars) and hands `core::download` a `Transcoder`. The child process is
+macOS users set the settings option (or rely on PATH) instead. `core::download` defines an
+object-safe `Transcode` trait; the `transcode` crate depends on `core` and
+implements it for its `Transcoder` (so `core` never depends on a concrete
+transcoder). `src-tauri` depends on both, resolves the ffmpeg path per
+download start (settings first, then `downloadhub_transcode::locate_ffmpeg`:
+exe-adjacent sidecar, then PATH as a dev fallback since `tauri dev` doesn't
+stage sidecars) and hands `core::download` the `Transcoder` as
+`&dyn Transcode`. The child process is
 spawned with `kill_on_drop`, so cancelling a download mid-transcode kills
 ffmpeg rather than orphaning it.
 

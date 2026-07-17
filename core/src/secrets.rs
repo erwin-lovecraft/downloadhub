@@ -25,7 +25,11 @@ macro_rules! resolve_secret {
         std::env::var($name)
             .ok()
             .filter(|v| !v.is_empty())
-            .or_else(|| option_env!($name).filter(|v| !v.is_empty()).map(String::from))
+            .or_else(|| {
+                option_env!($name)
+                    .filter(|v| !v.is_empty())
+                    .map(String::from)
+            })
     };
 }
 

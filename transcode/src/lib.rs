@@ -8,8 +8,12 @@
 //! and keeps the GPL boundary simple (ffmpeg GPL builds match this
 //! project's GPL-3.0-or-later license).
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
+
+use downloadhub_core::download::{BoxError, Transcode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TranscodeError {
@@ -84,6 +88,48 @@ impl Transcoder {
             })
         }
     }
+}
+
+/// The `core`-facing seam: `core::download` orchestrates *when* a
+/// conversion happens through this trait, without depending on this crate.
+impl Transcode for Transcoder {
+    fn to_mp3<'a>(
+        &'a self,
+        input: &'a Path,
+        output: &'a Path,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + 'a>> {
+        Box::pin(async move {
+            Transcoder::to_mp3(self, input, output)
+                .await
+                .map_err(BoxError::from)
+        })
+    }
+}
+
+/// Locates an ffmpeg binary without any configuration: next to the current
+/// executable first (Tauri stages `externalBin` sidecars there in installed
+/// builds), then on PATH (the dev fallback — `tauri dev` doesn't stage
+/// sidecars next to the debug binary).
+pub fn locate_ffmpeg() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(candidate) = exe.parent().map(|dir| dir.join(name)) {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|p| p.is_file())
+    })
 }
 
 #[cfg(test)]
