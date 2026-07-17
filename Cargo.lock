@@ -938,6 +938,7 @@ version = "1.0.3"
 dependencies = [
  "dotenvy",
  "downloadhub-core",
+ "downloadhub-transcode",
  "serde",
  "serde_json",
  "tauri",
@@ -953,7 +954,6 @@ name = "downloadhub-core"
 version = "1.0.3"
 dependencies = [
  "dirs",
- "downloadhub-transcode",
  "keyring",
  "oauth2",
  "reqwest 0.13.4",
@@ -984,6 +984,7 @@ dependencies = [
 name = "downloadhub-transcode"
 version = "1.0.3"
 dependencies = [
+ "downloadhub-core",
  "thiserror 2.0.18",
  "tokio",
 ]

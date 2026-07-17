@@ -6,7 +6,7 @@
 
 use crate::state::AppState;
 use downloadhub_core::download::{
-    self, BatchDownloadOutcome, DownloadContext, DownloadPhase, DownloadProgress,
+    self, BatchDownloadOutcome, DownloadContext, DownloadPhase, DownloadProgress, Transcode,
 };
 use downloadhub_core::queue::QueueStatus;
 use serde::Serialize;
@@ -108,7 +108,7 @@ pub async fn spawn_download<R: tauri::Runtime>(
         let ctx = DownloadContext {
             stream_client: &state.stream_client,
             store,
-            transcoder: transcoder.as_ref(),
+            transcoder: transcoder.as_ref().map(|t| t as &dyn Transcode),
         };
 
         let progress_app = task_app.clone();
@@ -220,7 +220,7 @@ async fn run_batch<R: tauri::Runtime>(
     let ctx = DownloadContext {
         stream_client: &state.stream_client,
         store,
-        transcoder: transcoder.as_ref(),
+        transcoder: transcoder.as_ref().map(|t| t as &dyn Transcode),
     };
 
     let progress_app = app.clone();

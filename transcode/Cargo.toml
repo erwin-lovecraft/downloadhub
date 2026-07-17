@@ -9,6 +9,7 @@ description = "Audio transcoding for downloadhub via an external ffmpeg binary (
 name = "downloadhub_transcode"
 
 [dependencies]
+downloadhub-core = { path = "../core" }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["process"] }
 
