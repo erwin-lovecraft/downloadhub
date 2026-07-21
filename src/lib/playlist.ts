@@ -1,18 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { VideoSummary } from "@/lib/youtube";
-import type { QueueEntry } from "@/lib/queue";
-
-export type FormatPreference = "best_progressive" | "best_audio_only";
-
-export interface PlaylistImportSkip {
-  video_id: string;
-  reason: string;
-}
-
-export interface PlaylistImportOutcome {
-  added: QueueEntry[];
-  skipped: PlaylistImportSkip[];
-}
+import type { EnqueueOutcome, FormatPreference } from "@/lib/enqueue";
 
 export const listPlaylistItems = (playlistUrlOrId: string) =>
   invoke<VideoSummary[]>("list_playlist_items", { playlistUrlOrId });
@@ -25,4 +13,4 @@ export interface ImportPlaylistParams {
 }
 
 export const importPlaylistToQueue = (params: ImportPlaylistParams) =>
-  invoke<PlaylistImportOutcome>("import_playlist_to_queue", params);
+  invoke<EnqueueOutcome>("import_playlist_to_queue", params);

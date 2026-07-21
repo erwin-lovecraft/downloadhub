@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatDuration } from "@/lib/format";
 import { pickOutputFolder } from "@/lib/dialog";
-import type { FormatPreference } from "@/lib/playlist";
+import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
 
 export function PlaylistImportDialog({
   open,
@@ -141,22 +141,17 @@ export function PlaylistImportDialog({
             </ul>
 
             <div className="flex shrink-0 items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={preference === "best_progressive" ? "default" : "outline"}
-                onClick={() => setPreference("best_progressive")}
-              >
-                Best quality (video + audio)
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={preference === "best_audio_only" ? "default" : "outline"}
-                onClick={() => setPreference("best_audio_only")}
-              >
-                Audio only
-              </Button>
+              {(Object.keys(FORMAT_PREFERENCE_LABELS) as FormatPreference[]).map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  size="sm"
+                  variant={preference === option ? "default" : "outline"}
+                  onClick={() => setPreference(option)}
+                >
+                  {FORMAT_PREFERENCE_LABELS[option]}
+                </Button>
+              ))}
             </div>
 
             <div className="flex shrink-0 gap-2">

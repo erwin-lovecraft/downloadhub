@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { FormatPreference, ReformatOutcome } from "@/lib/enqueue";
 
 export type QueueStatus = "queued" | "downloading" | "completed" | "failed" | "cancelled";
 
@@ -31,3 +32,29 @@ export const listQueue = () => invoke<QueueEntry[]>("list_queue");
 
 export const removeFromQueue = (queueId: number) =>
   invoke<void>("remove_from_queue", { queueId });
+
+export interface SetQueueEntryFormatParams {
+  queueId: number;
+  itag: number;
+  qualityLabel: string | null;
+  convertToMp3: boolean;
+  [key: string]: unknown;
+}
+
+/** Repoints one entry at an exact itag the user picked for that video. */
+export const setQueueEntryFormat = (params: SetQueueEntryFormatParams) =>
+  invoke<QueueEntry>("set_queue_entry_format", params);
+
+export interface SetQueueEntriesQualityParams {
+  queueIds: number[];
+  preference: FormatPreference;
+  [key: string]: unknown;
+}
+
+/**
+ * Re-resolves several entries against one quality preference. A preference
+ * rather than an itag, because a multi-select spans videos whose available
+ * itags differ — the backend resolves each video individually.
+ */
+export const setQueueEntriesQuality = (params: SetQueueEntriesQualityParams) =>
+  invoke<ReformatOutcome>("set_queue_entries_quality", params);

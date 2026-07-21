@@ -54,10 +54,10 @@ pub struct VideoDetail {
     pub formats: Vec<FormatSummary>,
 }
 
-/// A quality shortcut for bulk operations (playlist import) that can't
-/// reasonably ask the user to pick an exact itag per video, since the
-/// available itags vary video to video. Also used as the persisted
-/// default quality in `core::settings`.
+/// A quality shortcut for operations that can't reasonably ask the user to
+/// pick an exact itag per video, since the available itags vary video to
+/// video: playlist import, MCP enqueueing, and bulk re-format of queue
+/// entries. Also used as the persisted default quality in `core::settings`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormatPreference {
@@ -67,8 +67,35 @@ pub enum FormatPreference {
     /// would violate what the user asked for.
     #[default]
     BestProgressive,
-    /// Highest-bitrate audio-only format.
+    /// Highest-bitrate audio-only format, kept in its original container.
     BestAudioOnly,
+    /// Audio-only, transcoded to MP3 after download (`convert_to_mp3`).
+    /// Selects [`MP3_SOURCE_ITAG`] when offered, since the conversion is
+    /// lossy-to-lossy and wants the best universal source.
+    Mp3,
+}
+
+impl FormatPreference {
+    /// Whether an entry queued under this preference should be transcoded
+    /// to MP3 once downloaded — the `convert_to_mp3` flag on the queue row.
+    pub fn convert_to_mp3(self) -> bool {
+        matches!(self, FormatPreference::Mp3)
+    }
+}
+
+/// itag 140 is the standard 128 kbps AAC (m4a) audio-only stream, present
+/// on virtually every video. Preferred as the MP3 transcode source over
+/// itag 139 (~48 kbps HE-AAC), whose low quality would compound with the
+/// lossy-to-lossy conversion.
+pub const MP3_SOURCE_ITAG: u32 = 140;
+
+/// What a [`FormatPreference`] resolved to for one specific video: the
+/// exact itag to fetch plus the queue-row fields that go with it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ResolvedFormat {
+    pub itag: u32,
+    pub quality_label: Option<String>,
+    pub convert_to_mp3: bool,
 }
 
 /// Picks the format matching `preference` from an already-fetched list, or
@@ -83,11 +110,22 @@ pub(crate) fn select_format(
             .iter()
             .filter(|f| f.has_video && f.has_audio)
             .max_by_key(|f| f.height.unwrap_or(0)),
-        FormatPreference::BestAudioOnly => formats
+        FormatPreference::BestAudioOnly => best_audio_only(formats),
+        // Prefer the known-good transcode source, but don't fail the whole
+        // request when a video doesn't offer it — any audio-only stream
+        // converts to MP3 just as well, only from a different source.
+        FormatPreference::Mp3 => formats
             .iter()
-            .filter(|f| f.has_audio && !f.has_video)
-            .max_by_key(|f| f.bitrate.unwrap_or(0)),
+            .find(|f| f.itag == MP3_SOURCE_ITAG && f.has_audio && !f.has_video)
+            .or_else(|| best_audio_only(formats)),
     }
+}
+
+fn best_audio_only(formats: &[FormatSummary]) -> Option<&FormatSummary> {
+    formats
+        .iter()
+        .filter(|f| f.has_audio && !f.has_video)
+        .max_by_key(|f| f.bitrate.unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -147,5 +185,39 @@ mod tests {
         ];
         let picked = select_format(&formats, FormatPreference::BestAudioOnly).unwrap();
         assert_eq!(picked.itag, 140);
+    }
+
+    #[test]
+    fn mp3_prefers_the_standard_source_itag_over_a_higher_bitrate_one() {
+        let formats = vec![
+            format(251, false, true, None, Some(160_000)),
+            format(MP3_SOURCE_ITAG, false, true, None, Some(128_000)),
+        ];
+        let picked = select_format(&formats, FormatPreference::Mp3).unwrap();
+        assert_eq!(picked.itag, MP3_SOURCE_ITAG);
+    }
+
+    #[test]
+    fn mp3_falls_back_to_best_audio_only_when_the_source_itag_is_absent() {
+        let formats = vec![
+            format(18, true, true, Some(360), Some(96_000)),
+            format(139, false, true, None, Some(48_000)),
+            format(251, false, true, None, Some(160_000)),
+        ];
+        let picked = select_format(&formats, FormatPreference::Mp3).unwrap();
+        assert_eq!(picked.itag, 251);
+    }
+
+    #[test]
+    fn mp3_returns_none_when_the_video_has_no_audio_only_format() {
+        let formats = vec![format(18, true, true, Some(360), Some(96_000))];
+        assert!(select_format(&formats, FormatPreference::Mp3).is_none());
+    }
+
+    #[test]
+    fn only_mp3_sets_the_conversion_flag() {
+        assert!(FormatPreference::Mp3.convert_to_mp3());
+        assert!(!FormatPreference::BestAudioOnly.convert_to_mp3());
+        assert!(!FormatPreference::BestProgressive.convert_to_mp3());
     }
 }

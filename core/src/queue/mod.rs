@@ -21,5 +21,3 @@ mod store;
 
 pub use entry::{NewQueueEntry, QueueEntry, QueueStatus};
 pub use store::{QueueError, QueueStore};
-
-pub(crate) use repository::now_unix;

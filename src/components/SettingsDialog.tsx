@@ -12,7 +12,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { pickFile, pickOutputFolder } from "@/lib/dialog";
 import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
-import type { FormatPreference } from "@/lib/playlist";
+import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
 
 export function SettingsDialog({
   open,
@@ -109,22 +109,17 @@ export function SettingsDialog({
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium">Default quality</label>
               <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={quality === "best_progressive" ? "default" : "outline"}
-                  onClick={() => setQuality("best_progressive")}
-                >
-                  Best quality (video + audio)
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={quality === "best_audio_only" ? "default" : "outline"}
-                  onClick={() => setQuality("best_audio_only")}
-                >
-                  Audio only
-                </Button>
+                {(Object.keys(FORMAT_PREFERENCE_LABELS) as FormatPreference[]).map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    size="sm"
+                    variant={quality === option ? "default" : "outline"}
+                    onClick={() => setQuality(option)}
+                  >
+                    {FORMAT_PREFERENCE_LABELS[option]}
+                  </Button>
+                ))}
               </div>
             </div>
 
@@ -164,9 +159,9 @@ export function SettingsDialog({
                 Allow AI agent access (MCP server)
               </label>
               <p className="text-xs text-muted-foreground">
-                Lets external AI agents search and propose downloads via the
-                MCP server. Every queue change or download they request still
-                needs your approval here first.
+                Lets external AI agents search YouTube and add entries to your
+                queue directly. They cannot start downloads — only you can,
+                with "Download all". Review the queue before starting it.
               </p>
             </div>
 

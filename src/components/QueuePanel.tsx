@@ -2,9 +2,12 @@ import { useState } from "react";
 import { useQueue } from "@/hooks/useQueue";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ChangeFormatDialog } from "@/components/ChangeFormatDialog";
 import { formatBytes } from "@/lib/format";
 import { openFolder } from "@/lib/opener";
-import type { QueueStatus } from "@/lib/queue";
+import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
+import type { QueueEntry, QueueStatus } from "@/lib/queue";
 
 function statusClassName(status: QueueStatus): string {
   switch (status) {
@@ -19,13 +22,53 @@ function statusClassName(status: QueueStatus): string {
   }
 }
 
+/** What an entry's format line reads as. */
+function formatDescription(entry: QueueEntry): string {
+  return entry.convert_to_mp3
+    ? `mp3 (from itag ${entry.itag})`
+    : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`;
+}
+
 export function QueuePanel() {
-  const { list, start, cancel, remove, downloadAll } = useQueue();
+  const { list, start, cancel, remove, downloadAll, setQuality } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkQuality, setBulkQuality] = useState<FormatPreference>("mp3");
+  const [formatEntry, setFormatEntry] = useState<QueueEntry | null>(null);
 
-  const hasQueued = list.data?.some((entry) => entry.status === "queued") ?? false;
+  const entries = list.data ?? [];
+  const queued = entries.filter((entry) => entry.status === "queued");
+  const hasQueued = queued.length > 0;
   const batchRunning = downloadAll.isPending;
+
+  // An entry can only be re-formatted while it isn't mid-transfer; the
+  // backend enforces this too, but greying the checkbox explains why.
+  const selectable = entries.filter((entry) => entry.status !== "downloading");
+  // Entries can vanish (removed here, or by an agent over MCP) while still
+  // selected, so always intersect with what's actually on screen.
+  const selectedIds = selectable.filter((entry) => selected.has(entry.id)).map((e) => e.id);
+  const allQueuedSelected = hasQueued && queued.every((entry) => selected.has(entry.id));
+
+  function toggle(id: number, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAllQueued(checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const entry of queued) {
+        if (checked) next.add(entry.id);
+        else next.delete(entry.id);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -40,6 +83,75 @@ export function QueuePanel() {
           {batchRunning ? "Downloading..." : "Download all"}
         </Button>
       </div>
+
+      {selectable.length > 0 && (
+        <div className="flex shrink-0 flex-col gap-2 rounded-xl border bg-card p-2 text-xs">
+          <label className="flex cursor-pointer items-center gap-2">
+            <Checkbox
+              checked={allQueuedSelected}
+              disabled={!hasQueued || batchRunning}
+              onCheckedChange={(checked) => toggleAllQueued(checked === true)}
+            />
+            <span>Select all queued ({queued.length})</span>
+            {selectedIds.length > 0 && (
+              <button
+                type="button"
+                className="ml-auto text-muted-foreground underline-offset-2 hover:underline"
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </button>
+            )}
+          </label>
+
+          <div className="flex items-center gap-2">
+            <select
+              className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs"
+              value={bulkQuality}
+              disabled={batchRunning}
+              onChange={(e) => setBulkQuality(e.target.value as FormatPreference)}
+            >
+              {(Object.keys(FORMAT_PREFERENCE_LABELS) as FormatPreference[]).map((preference) => (
+                <option key={preference} value={preference}>
+                  {FORMAT_PREFERENCE_LABELS[preference]}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="xs"
+              variant="outline"
+              className="shrink-0"
+              disabled={selectedIds.length === 0 || setQuality.isPending || batchRunning}
+              onClick={() =>
+                setQuality.mutate(
+                  { queueIds: selectedIds, preference: bulkQuality },
+                  { onSuccess: () => setSelected(new Set()) }
+                )
+              }
+            >
+              {setQuality.isPending ? "Updating..." : `Update ${selectedIds.length || ""}`.trim()}
+            </Button>
+          </div>
+
+          {setQuality.error && (
+            <p className="text-destructive">
+              {setQuality.error instanceof Error
+                ? setQuality.error.message
+                : String(setQuality.error)}
+            </p>
+          )}
+
+          {setQuality.data && setQuality.data.skipped.length > 0 && (
+            <ul className="max-h-20 overflow-y-auto text-muted-foreground">
+              {setQuality.data.skipped.map((skip) => (
+                <li key={skip.video_id}>
+                  {skip.video_id}: {skip.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {openFolderError && (
         <p className="shrink-0 text-sm text-destructive">{openFolderError}</p>
@@ -73,7 +185,7 @@ export function QueuePanel() {
       )}
 
       <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-        {list.data?.map((entry) => {
+        {entries.map((entry) => {
           const progress = progressByQueueId[entry.id];
           const isTranscoding = progress?.status === "transcoding";
           const isDownloading =
@@ -90,88 +202,102 @@ export function QueuePanel() {
           return (
             <li
               key={entry.id}
-              className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-xs shadow-xs"
+              className="flex gap-2 rounded-xl border bg-card p-3 text-xs shadow-xs"
             >
-              <span className="truncate text-sm font-medium" title={entry.title}>
-                {entry.title}
-              </span>
-              <div className="flex items-center justify-between gap-2">
-                <span className={`font-medium capitalize ${statusClassName(entry.status)}`}>
-                  {entry.status}
+              <Checkbox
+                className="mt-0.5 shrink-0"
+                checked={selected.has(entry.id)}
+                disabled={isDownloading || batchRunning}
+                onCheckedChange={(checked) => toggle(entry.id, checked === true)}
+              />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="truncate text-sm font-medium" title={entry.title}>
+                  {entry.title}
                 </span>
-                <div className="flex shrink-0 items-center gap-2">
-                  {isDownloading ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={cancel.isPending || batchRunning}
-                      onClick={() => cancel.mutate(entry.id)}
-                    >
-                      Cancel
-                    </Button>
-                  ) : entry.status === "completed" ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() =>
-                        openFolder(entry.output_path)
-                          .then(() => setOpenFolderError(null))
-                          .catch((err) => setOpenFolderError(String(err)))
-                      }
-                    >
-                      Open in files
-                    </Button>
-                  ) : (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={!canStart || start.isPending || batchRunning}
-                      onClick={() => start.mutate(entry.id)}
-                    >
-                      {startLabel}
-                    </Button>
-                  )}
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={isDownloading || remove.isPending || batchRunning}
-                    onClick={() => remove.mutate(entry.id)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-              <span className="text-muted-foreground">
-                {entry.convert_to_mp3
-                  ? `mp3 (from itag ${entry.itag})`
-                  : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`}
-              </span>
-              <span className="truncate text-muted-foreground" title={entry.output_path}>
-                {entry.output_path}
-              </span>
-              {isDownloading && (
-                <div className="flex items-center gap-2">
-                  {percent !== null && (
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full bg-primary transition-all" style={{ width: `${percent}%` }} />
-                    </div>
-                  )}
-                  <span className="text-muted-foreground">
-                    {isTranscoding
-                      ? "converting to mp3..."
-                      : progress
-                        ? `${formatBytes(progress.bytes_written)}${
-                            progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
-                          }`
-                        : "starting..."}
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`font-medium capitalize ${statusClassName(entry.status)}`}>
+                    {entry.status}
                   </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {isDownloading ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={cancel.isPending || batchRunning}
+                        onClick={() => cancel.mutate(entry.id)}
+                      >
+                        Cancel
+                      </Button>
+                    ) : entry.status === "completed" ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() =>
+                          openFolder(entry.output_path)
+                            .then(() => setOpenFolderError(null))
+                            .catch((err) => setOpenFolderError(String(err)))
+                        }
+                      >
+                        Open in files
+                      </Button>
+                    ) : (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={!canStart || start.isPending || batchRunning}
+                        onClick={() => start.mutate(entry.id)}
+                      >
+                        {startLabel}
+                      </Button>
+                    )}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={isDownloading || remove.isPending || batchRunning}
+                      onClick={() => remove.mutate(entry.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
-              )}
-              {entry.error_message && <span className="text-destructive">{entry.error_message}</span>}
+                <button
+                  type="button"
+                  className="w-fit text-left text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:no-underline disabled:hover:text-muted-foreground"
+                  disabled={isDownloading || batchRunning}
+                  title="Change this entry's format"
+                  onClick={() => setFormatEntry(entry)}
+                >
+                  {formatDescription(entry)}
+                </button>
+                <span className="truncate text-muted-foreground" title={entry.output_path}>
+                  {entry.output_path}
+                </span>
+                {isDownloading && (
+                  <div className="flex items-center gap-2">
+                    {percent !== null && (
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full bg-primary transition-all" style={{ width: `${percent}%` }} />
+                      </div>
+                    )}
+                    <span className="text-muted-foreground">
+                      {isTranscoding
+                        ? "converting to mp3..."
+                        : progress
+                          ? `${formatBytes(progress.bytes_written)}${
+                              progress.total_bytes ? ` / ${formatBytes(progress.total_bytes)}` : ""
+                            }`
+                          : "starting..."}
+                    </span>
+                  </div>
+                )}
+                {entry.error_message && <span className="text-destructive">{entry.error_message}</span>}
+              </div>
             </li>
           );
         })}
       </ul>
+
+      <ChangeFormatDialog entry={formatEntry} onClose={() => setFormatEntry(null)} />
     </div>
   );
 }

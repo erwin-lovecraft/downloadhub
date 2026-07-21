@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FormatPreference } from "@/lib/playlist";
+import type { FormatPreference } from "@/lib/enqueue";
 
 export interface AppSettings {
   default_output_path: string | null;

@@ -28,3 +28,10 @@ pub fn queue_db_path(app_data_dir: &Path) -> PathBuf {
 pub fn settings_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("settings.json")
 }
+
+/// The OS "Downloads" folder, used as the last-resort destination when the
+/// user hasn't configured a default output folder. `None` on a system with
+/// no such folder, where the caller must ask for an explicit path instead.
+pub fn downloads_dir() -> Option<PathBuf> {
+    dirs::download_dir()
+}

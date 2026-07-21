@@ -8,7 +8,7 @@ mod client;
 mod models;
 
 pub use client::StreamClient;
-pub use models::{FormatPreference, FormatSummary, VideoDetail};
+pub use models::{FormatPreference, FormatSummary, ResolvedFormat, VideoDetail, MP3_SOURCE_ITAG};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {

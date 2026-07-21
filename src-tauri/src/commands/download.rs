@@ -80,10 +80,10 @@ pub async fn start_download<R: tauri::Runtime>(
     spawn_download(&app, &state, queue_id).await
 }
 
-/// The guarded spawn behind `start_download`, shared with
-/// `approve_agent_action` (an approved agent `start_download` request must
-/// behave exactly like the user clicking Start: same guards, same
-/// `running_downloads` registry, same progress events).
+/// The guarded spawn behind `start_download`. Kept factored out from the
+/// command itself so any future caller starts a download exactly the way
+/// the user clicking Start does: same guards, same `running_downloads`
+/// registry, same progress events.
 pub async fn spawn_download<R: tauri::Runtime>(
     app: &AppHandle<R>,
     state: &AppState,
@@ -184,10 +184,9 @@ pub async fn download_all<R: tauri::Runtime>(
     run_batch_guarded(&app, &state).await
 }
 
-/// The guarded batch run behind `download_all`, shared with
-/// `approve_agent_action` (an approved agent `download_all` request must
-/// behave exactly like the user clicking "Download all", including the
-/// `batch_running` exclusivity guards).
+/// The guarded batch run behind `download_all`, factored out so any future
+/// caller gets the `batch_running` exclusivity guards rather than
+/// re-implementing them.
 pub async fn run_batch_guarded<R: tauri::Runtime>(
     app: &AppHandle<R>,
     state: &AppState,

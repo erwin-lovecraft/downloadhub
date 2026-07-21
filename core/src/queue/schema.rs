@@ -1,6 +1,9 @@
-//! Schema setup and migrations for the shared queue database (both the
-//! `queue_entries` table and `core::agent`'s `pending_agent_actions` table,
-//! which lives in the same file).
+//! Schema setup and migrations for the shared queue database.
+//!
+//! Databases created before agent actions became direct enqueues may still
+//! carry a `pending_agent_actions` table. It is deliberately left in place
+//! rather than dropped — nothing reads or writes it any more, and dropping
+//! a table on open is a destructive migration for no benefit.
 
 use rusqlite::Connection;
 
@@ -19,15 +22,6 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             status TEXT NOT NULL,
             error_message TEXT,
             created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS pending_agent_actions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            payload TEXT NOT NULL,
-            status TEXT NOT NULL,
-            requested_by TEXT,
-            error_message TEXT,
-            created_at INTEGER NOT NULL,
-            resolved_at INTEGER
         );",
     )?;
     // Databases created before the MP3-conversion feature lack the column;

@@ -54,8 +54,7 @@ pub struct QueueEntry {
 }
 
 /// Fields needed to add a new entry; `status`/`id`/`created_at` are assigned
-/// by the store. Serde derives exist because `core::agent` embeds this in a
-/// pending agent action's persisted JSON payload.
+/// by the store.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewQueueEntry {
     pub video_id: String,

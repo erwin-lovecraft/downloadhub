@@ -13,6 +13,7 @@ use rusqlite::Connection;
 use super::entry::{NewQueueEntry, QueueEntry, QueueStatus};
 use super::repository::QueueRepository;
 use super::schema;
+use crate::stream::ResolvedFormat;
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueueError {
@@ -25,9 +26,7 @@ pub enum QueueError {
 /// Opens (and owns) the queue's SQLite database. Cheap to clone-and-share
 /// via `Arc` if needed; internally the connection is already behind one.
 pub struct QueueStore {
-    /// `pub(crate)` so `core::agent` can add its own methods on this store
-    /// (its table lives in the same database file).
-    pub(crate) conn: Arc<Mutex<Connection>>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl QueueStore {
@@ -79,6 +78,23 @@ impl QueueStore {
     ) -> Result<(), QueueError> {
         let error_message = error_message.map(str::to_string);
         self.with_repository(move |repo| repo.set_status(id, status, error_message))
+            .await
+    }
+
+    /// Repoints an entry at a different stream format, resetting it to
+    /// `Queued` with its error cleared. Returns the updated entry, or
+    /// `None` if it no longer exists.
+    pub async fn set_format(
+        &self,
+        id: i64,
+        format: &ResolvedFormat,
+    ) -> Result<Option<QueueEntry>, QueueError> {
+        let (itag, quality_label, convert_to_mp3) = (
+            format.itag,
+            format.quality_label.clone(),
+            format.convert_to_mp3,
+        );
+        self.with_repository(move |repo| repo.set_format(id, itag, quality_label, convert_to_mp3))
             .await
     }
 
@@ -223,6 +239,54 @@ mod tests {
         let updated = store.get_entry(added.id).await.unwrap().unwrap();
         assert_eq!(updated.status, QueueStatus::Failed);
         assert_eq!(updated.error_message.as_deref(), Some("network error"));
+    }
+
+    #[tokio::test]
+    async fn set_format_repoints_the_entry_and_requeues_it() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let added = store.add_entry(new_entry("abc123")).await.unwrap();
+        // A previously failed attempt: its error and status must not
+        // survive being pointed at a different format.
+        store
+            .set_status(added.id, QueueStatus::Failed, Some("network error"))
+            .await
+            .unwrap();
+
+        let updated = store
+            .set_format(
+                added.id,
+                &ResolvedFormat {
+                    itag: 140,
+                    quality_label: None,
+                    convert_to_mp3: true,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(updated.itag, 140);
+        assert_eq!(updated.quality_label, None);
+        assert!(updated.convert_to_mp3);
+        assert_eq!(updated.status, QueueStatus::Queued);
+        assert_eq!(updated.error_message, None);
+    }
+
+    #[tokio::test]
+    async fn set_format_reports_a_missing_entry_as_none() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let missing = store
+            .set_format(
+                404,
+                &ResolvedFormat {
+                    itag: 140,
+                    quality_label: None,
+                    convert_to_mp3: true,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(missing.is_none());
     }
 
     #[tokio::test]

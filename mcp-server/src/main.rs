@@ -1,13 +1,18 @@
 //! MCP server binary (Phase 3): exposes downloadhub to external AI agents
 //! over stdio.
 //!
-//! Read-only tools (`search_videos`, `get_video_formats`, `list_queue`)
-//! execute directly. Tools that would mutate the queue or start a download
-//! (`add_to_queue`, `start_download`, `download_all`) never execute here —
-//! they record a *pending agent action* (`core::agent`) in the shared
-//! queue database, which the running desktop app surfaces for explicit
-//! user approval before anything happens. This binary must never trigger
-//! downloads unattended.
+//! **This server can search and it can queue, but it cannot download.**
+//! There is deliberately no tool here that starts a transfer: the queue is
+//! a proposal the user reviews in the desktop app, where "Download all" is
+//! the single human action that spends bandwidth and writes media files.
+//! An agent filling the queue is cheap and reversible (entries are visible,
+//! re-formattable, and removable before anything runs); an agent starting
+//! downloads unattended is neither. That boundary — not a per-action
+//! approval prompt — is what keeps agent access safe, and it is enforced by
+//! the tool surface rather than by a check that could be bypassed.
+//!
+//! Queue tools take *lists* of videos rather than one per call: an agent
+//! adding a ten-track album should spend one round-trip, not ten.
 //!
 //! Registration with Claude Desktop / Gemini CLI / Codex is documented in
 //! `docs/MCP_SETUP.md`.
@@ -18,24 +23,24 @@ use std::sync::Arc;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
-    service::{RequestContext, RoleServer},
     tool, tool_handler, tool_router,
     transport::stdio,
     ServerHandler, ServiceExt,
 };
 
-use downloadhub_core::agent::AgentActionRequest;
-use downloadhub_core::queue::{NewQueueEntry, QueueStatus, QueueStore};
+use downloadhub_core::enqueue;
+use downloadhub_core::queue::QueueStore;
 use downloadhub_core::settings;
-use downloadhub_core::stream::StreamClient;
+use downloadhub_core::stream::{FormatPreference, StreamClient};
 use downloadhub_core::youtube::YoutubeClient;
 
-const INSTRUCTIONS: &str = "Search YouTube and manage downloadhub's download queue. \
-Read-only tools (search_videos, get_video_formats, list_queue) return results directly. \
-Tools that change the queue or start downloads (add_to_queue, start_download, download_all) \
-do NOT execute immediately: they create a pending action that the user must explicitly \
-approve inside the running DownloadHub desktop app. After calling one, tell the user to \
-open DownloadHub and approve or reject the request, then check list_queue to see the result.";
+const INSTRUCTIONS: &str = "Search YouTube and fill DownloadHub's download queue. \
+Adding to the queue takes effect immediately — no approval step. \
+Nothing is downloaded until the user opens the DownloadHub desktop app and clicks \
+'Download all'; this server has no tool that can start a transfer, so always tell the \
+user to do that once you have queued what they asked for. \
+Prefer add_mp3_to_queue for music/audio requests and add_to_queue for video. \
+Both accept a LIST of videos: queue everything in one call rather than calling once per video.";
 
 #[derive(Clone)]
 struct DownloadHub {
@@ -44,6 +49,32 @@ struct DownloadHub {
     settings_path: PathBuf,
     youtube_api_key: Option<String>,
     tool_router: ToolRouter<Self>,
+}
+
+/// The agent-facing spelling of [`FormatPreference`]. Mirrored here rather
+/// than deriving `JsonSchema` on the core type so `core` doesn't take a
+/// schemars dependency for one binary's benefit, and so the descriptions
+/// can be written for an agent rather than for the UI.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum Quality {
+    /// Highest resolution with video and audio in a single file.
+    #[default]
+    BestProgressive,
+    /// Highest-bitrate audio-only stream, left in its original container.
+    BestAudioOnly,
+    /// Audio-only, converted to MP3 after download.
+    Mp3,
+}
+
+impl From<Quality> for FormatPreference {
+    fn from(quality: Quality) -> Self {
+        match quality {
+            Quality::BestProgressive => FormatPreference::BestProgressive,
+            Quality::BestAudioOnly => FormatPreference::BestAudioOnly,
+            Quality::Mp3 => FormatPreference::Mp3,
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -62,20 +93,36 @@ struct GetVideoFormatsParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct AddToQueueParams {
-    #[schemars(description = "YouTube video URL or bare 11-character video id")]
-    video: String,
-    #[schemars(description = "Stream format itag to download, as returned by get_video_formats")]
-    itag: u32,
     #[schemars(
-        description = "Destination folder. Omit to use the user's default output folder from DownloadHub's settings."
+        description = "YouTube video URLs or bare 11-character video ids. Pass every video you want queued in this one call."
+    )]
+    videos: Vec<String>,
+    #[schemars(
+        description = "Quality to resolve for each video. Defaults to the user's configured default quality."
+    )]
+    quality: Option<Quality>,
+    #[schemars(
+        description = "Destination folder. Omit to use the user's default output folder, falling back to their Downloads folder."
     )]
     output_path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct StartDownloadParams {
-    #[schemars(description = "Queue entry id, as returned by list_queue or add_to_queue")]
-    queue_id: i64,
+struct AddMp3ToQueueParams {
+    #[schemars(
+        description = "YouTube video URLs or bare 11-character video ids. Pass every track you want queued in this one call."
+    )]
+    videos: Vec<String>,
+    #[schemars(
+        description = "Destination folder. Omit to use the user's default output folder, falling back to their Downloads folder."
+    )]
+    output_path: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RemoveFromQueueParams {
+    #[schemars(description = "Queue entry ids to remove, as returned by list_queue")]
+    queue_ids: Vec<i64>,
 }
 
 #[tool_router(router = tool_router)]
@@ -100,10 +147,7 @@ impl DownloadHub {
     /// Re-read on every call (not cached at startup) so toggling the
     /// setting in the running desktop app takes effect immediately.
     async fn ensure_enabled(&self) -> Result<(), String> {
-        let settings = settings::load(&self.settings_path)
-            .await
-            .map_err(|e| format!("failed to read DownloadHub settings: {e}"))?;
-        if settings.mcp_enabled {
+        if self.settings().await?.mcp_enabled {
             Ok(())
         } else {
             Err(
@@ -114,13 +158,38 @@ impl DownloadHub {
         }
     }
 
-    /// The MCP client's self-reported name, recorded on pending actions so
-    /// the approval prompt can say who is asking. Display-only.
-    fn requested_by(context: &RequestContext<RoleServer>) -> Option<String> {
-        context
-            .peer
-            .peer_info()
-            .map(|info| info.client_info.name.clone())
+    async fn settings(&self) -> Result<settings::AppSettings, String> {
+        settings::load(&self.settings_path)
+            .await
+            .map_err(|e| format!("failed to read DownloadHub settings: {e}"))
+    }
+
+    /// The folder queued entries land in: the caller's explicit choice, the
+    /// user's configured default, then their Downloads folder. Only a
+    /// system with no Downloads folder at all leaves the agent to ask.
+    async fn resolve_output_path(&self, requested: Option<String>) -> Result<String, String> {
+        if let Some(path) = requested
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+        {
+            return Ok(path);
+        }
+        if let Some(default) = self
+            .settings()
+            .await?
+            .default_output_path
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+        {
+            return Ok(default);
+        }
+        downloadhub_core::paths::downloads_dir()
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .ok_or_else(|| {
+                "no output_path given, and neither a default output folder nor a Downloads \
+                 folder could be found; pass output_path explicitly"
+                    .to_string()
+            })
     }
 
     #[tool(
@@ -145,7 +214,7 @@ impl DownloadHub {
     }
 
     #[tool(
-        description = "List every downloadable stream format (itag, mime type, resolution, size, video/audio flags) for a YouTube video. Read-only; needs no configuration."
+        description = "List every downloadable stream format (itag, mime type, resolution, size, video/audio flags) for a YouTube video. Read-only. Only needed to inspect what a video offers — add_to_queue resolves formats on its own."
     )]
     async fn get_video_formats(
         &self,
@@ -174,152 +243,88 @@ impl DownloadHub {
     }
 
     #[tool(
-        description = "Request adding a video (in a specific format) to the download queue. Does NOT add it directly: creates a pending action the user must approve in the DownloadHub desktop app."
+        description = "Add one or more videos to the download queue at the given quality. Takes effect immediately. Does NOT download them: the user starts the queue from the DownloadHub app. Pass all videos in a single call."
     )]
     async fn add_to_queue(
         &self,
         Parameters(params): Parameters<AddToQueueParams>,
-        context: RequestContext<RoleServer>,
     ) -> Result<String, String> {
         self.ensure_enabled().await?;
-
-        let output_path = match params.output_path {
-            Some(path) if !path.trim().is_empty() => path,
-            _ => {
-                let settings = settings::load(&self.settings_path)
-                    .await
-                    .map_err(|e| format!("failed to read DownloadHub settings: {e}"))?;
-                settings.default_output_path.ok_or_else(|| {
-                    "no output_path given and the user has no default output folder configured; \
-                     pass output_path or ask the user to set a default in DownloadHub's settings"
-                        .to_string()
-                })?
-            }
+        let quality = match params.quality {
+            Some(quality) => quality.into(),
+            None => self.settings().await?.default_quality,
         };
-
-        // Resolve the video ourselves rather than trusting agent-supplied
-        // title/quality strings, so the approval prompt the user sees
-        // describes the actual video, and a bogus itag fails here with the
-        // real options instead of surfacing later as a failed download.
-        let detail = self
-            .stream_client
-            .get_video_formats(&params.video)
+        self.enqueue(params.videos, quality, params.output_path)
             .await
-            .map_err(|e| e.to_string())?;
-        let format = detail
-            .formats
-            .iter()
-            .find(|f| f.itag == params.itag)
-            .ok_or_else(|| {
-                format!(
-                    "itag {} is not offered for this video; available itags: {}",
-                    params.itag,
-                    detail
-                        .formats
-                        .iter()
-                        .map(|f| f.itag.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            })?;
-
-        let request = AgentActionRequest::AddToQueue {
-            entry: NewQueueEntry {
-                video_id: detail.video_id.clone(),
-                title: detail.title.clone(),
-                itag: format.itag,
-                quality_label: format
-                    .quality_label
-                    .clone()
-                    .or_else(|| format.quality.clone()),
-                output_path,
-                // Agent-proposed entries don't opt into MP3 conversion yet;
-                // the desktop UI is the only writer of this flag.
-                convert_to_mp3: false,
-            },
-        };
-        self.submit_for_approval(request, &context).await
     }
 
     #[tool(
-        description = "Request starting the download of an existing queue entry. Does NOT start it directly: creates a pending action the user must approve in the DownloadHub desktop app."
+        description = "Add one or more videos to the download queue as MP3 audio (converted after download). The right tool for music, songs, albums, and podcasts. Takes effect immediately, but downloads nothing: the user starts the queue from the DownloadHub app. Pass all tracks in a single call."
     )]
-    async fn start_download(
+    async fn add_mp3_to_queue(
         &self,
-        Parameters(params): Parameters<StartDownloadParams>,
-        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<AddMp3ToQueueParams>,
     ) -> Result<String, String> {
         self.ensure_enabled().await?;
-
-        let entry = self
-            .queue_store
-            .get_entry(params.queue_id)
+        self.enqueue(params.videos, FormatPreference::Mp3, params.output_path)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| {
-                format!(
-                    "queue entry {} not found; call list_queue to see current entries",
-                    params.queue_id
-                )
-            })?;
-        if entry.status == QueueStatus::Downloading {
-            return Err(format!(
-                "queue entry {} is already downloading",
-                params.queue_id
-            ));
-        }
-
-        let request = AgentActionRequest::StartDownload {
-            queue_id: entry.id,
-            title: entry.title,
-        };
-        self.submit_for_approval(request, &context).await
     }
 
     #[tool(
-        description = "Request downloading every queued entry, one at a time. Does NOT start anything directly: creates a pending action the user must approve in the DownloadHub desktop app."
+        description = "Remove entries from the download queue by id. Use to undo a mistaken add before the user starts downloading."
     )]
-    async fn download_all(&self, context: RequestContext<RoleServer>) -> Result<String, String> {
-        self.ensure_enabled().await?;
-
-        let queued = self
-            .queue_store
-            .list_entries()
-            .await
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|e| e.status == QueueStatus::Queued)
-            .count();
-        if queued == 0 {
-            return Err(
-                "the queue has no entries in 'queued' status; add entries first via add_to_queue"
-                    .to_string(),
-            );
-        }
-
-        self.submit_for_approval(AgentActionRequest::DownloadAll, &context)
-            .await
-    }
-
-    /// Records `request` as a pending agent action and describes the
-    /// approval step in the tool result. This is the only way any mutating
-    /// tool "executes" in this process.
-    async fn submit_for_approval(
+    async fn remove_from_queue(
         &self,
-        request: AgentActionRequest,
-        context: &RequestContext<RoleServer>,
+        Parameters(params): Parameters<RemoveFromQueueParams>,
     ) -> Result<String, String> {
-        let action = self
-            .queue_store
-            .add_agent_action(request, Self::requested_by(context))
-            .await
-            .map_err(|e| e.to_string())?;
+        self.ensure_enabled().await?;
+        for queue_id in &params.queue_ids {
+            self.queue_store
+                .delete_entry(*queue_id)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         to_json(&serde_json::json!({
-            "pending_action": action,
-            "status": "awaiting_user_approval",
-            "note": "This request was recorded but will NOT run until the user approves it in \
-                     the DownloadHub desktop app (which must be open). Tell the user to review \
-                     it there; afterwards, list_queue reflects the outcome.",
+            "removed": params.queue_ids.len(),
+            "note": "Entries deleted. A download already running for one of them keeps going \
+                     until the user cancels it in the app.",
+        }))
+    }
+
+    /// The shared body of both add tools: resolve each video's format
+    /// against `quality` and insert it. Per-video failures are reported,
+    /// not fatal (`core::enqueue`).
+    async fn enqueue(
+        &self,
+        videos: Vec<String>,
+        quality: FormatPreference,
+        output_path: Option<String>,
+    ) -> Result<String, String> {
+        if videos.is_empty() {
+            return Err("no videos given; pass at least one URL or video id".to_string());
+        }
+        let output_path = self.resolve_output_path(output_path).await?;
+
+        let outcome = enqueue::enqueue_videos(
+            &self.stream_client,
+            &self.queue_store,
+            &videos,
+            quality,
+            &output_path,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        to_json(&serde_json::json!({
+            "added": outcome.added,
+            "skipped": outcome.skipped,
+            "output_path": output_path,
+            "note": format!(
+                "{} entr{} queued. Nothing is downloading yet — tell the user to open DownloadHub \
+                 and click 'Download all' (they can change formats or drop entries there first).",
+                outcome.added.len(),
+                if outcome.added.len() == 1 { "y" } else { "ies" },
+            ),
         }))
     }
 }

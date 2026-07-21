@@ -49,12 +49,13 @@ Both `src-tauri` and `mcp-server` operate on the same download queue. Both
 depend on `downloadhub-core`'s queue manager and share the same SQLite
 database file rather than one process calling into the other over local
 IPC — this avoids needing either binary to be running for the other to
-make progress (an agent can file requests while the app is closed; they
-wait), and keeps `downloadhub-core` as the single source of truth for
-queue state and transitions. Finalized in Phase 3: live progress events
-for the MCP client turned out not to be needed, because the MCP server
-never runs downloads at all (see "Pending agent actions" below) — agents
-poll `list_queue` for status, which reads the same rows the app updates.
+make progress (an agent can queue videos while the app is closed; they sit
+there until the user opens it), and keeps `downloadhub-core` as the single
+source of truth for queue state and transitions. Finalized in Phase 3:
+live progress events for the MCP client turned out not to be needed,
+because the MCP server never runs downloads at all (see "Where the agent
+boundary sits" below) — agents poll `list_queue` for status, which reads
+the same rows the app updates.
 
 To make two processes sharing one file safe, `QueueStore::open` puts the
 database in WAL journal mode and sets a 5-second busy timeout; with the
@@ -285,9 +286,9 @@ pick one itag for an entire playlist import isn't meaningful the way it is
 for a single video's "view formats" flow.
 
 Instead, `core::stream::FormatPreference` (`BestProgressive` /
-`BestAudioOnly`) is a two-option quality *shortcut*: `core::playlist`
-resolves each selected video's own format list against it individually
-(`StreamClient::resolve_preferred_format`, reusing the exact same
+`BestAudioOnly` / `Mp3`) is a quality *shortcut*: `core::enqueue` resolves
+each selected video's own format list against it individually
+(`StreamClient::resolve_queue_format`, reusing the exact same
 `get_video_formats` call the single-video flow already makes) and enqueues
 whatever itag that resolves to for that video — sequentially, one call per
 video. This was a deliberate choice over either (a) hardcoding a
@@ -413,8 +414,7 @@ search result, no format picker) queues the video's **itag 140** stream —
 the standard 128 kbps AAC-LC m4a, present on virtually every video — with a
 `convert_to_mp3` flag on the queue entry (a new SQLite column, added by an
 idempotent `ALTER TABLE` migration for databases created before it existed;
-`NewQueueEntry` deserializes the field with `serde(default)` so pending
-agent-action payloads persisted before the field stay readable). itag 140
+`NewQueueEntry` deserializes the field with `serde(default)`). itag 140
 was chosen over itag 139 (~48 kbps HE-AAC) deliberately: MP3 conversion is
 a lossy-to-lossy transcode, so it should start from the best universally
 available audio source rather than compounding 139's low bitrate.
@@ -470,6 +470,38 @@ MCP-proposed queue entries never set `convert_to_mp3` (the desktop UI is
 the only writer of the flag today); exposing it as a tool parameter is a
 straightforward later addition.
 
+### Queue editing (selection + re-format)
+
+Once an agent can fill the queue unattended, the queue stops being a
+write-once list and becomes something the user edits before committing to
+it. Two operations, deliberately different in kind:
+
+- **One entry, exact format** (`set_queue_entry_format`): click the format
+  line on a queue row to open `ChangeFormatDialog`, which lists that
+  video's real formats — the same `get_video_formats` call and layout as
+  the add-to-queue flow — and repoints the entry at the chosen itag.
+  Audio-only rows additionally offer "Use as MP3", since `convert_to_mp3`
+  is a property of the queue row rather than of the stream.
+- **Many entries, one preference** (`set_queue_entries_quality`): check
+  entries (or "Select all queued") and apply a `FormatPreference`. It
+  can't take an itag, because a multi-select spans videos whose available
+  itags differ — the same constraint that produced `FormatPreference` for
+  playlist import, which is why `core::enqueue::reformat_entries` shares
+  its per-video resolution and its "skip and report, don't abort" rule.
+
+Both reset the entry to `Queued` with its `error_message` cleared
+(`QueueStore::set_format`): the previous format's failure says nothing
+about the new one, and re-formatting a `Completed` entry is a request to
+fetch it again. Both refuse to touch a `Downloading` entry — changing the
+format under a running task would leave it writing the old stream to a
+path derived from the new one — and both are barred while a batch runs, by
+the same `ensure_no_batch_running` guard the other per-entry commands use.
+
+The shared resolution logic lives in `core::enqueue` (formerly
+`core::playlist`, renamed when the MCP add tools and the bulk re-format
+became the other two callers of the same "resolve a preference against
+each video, one at a time" loop).
+
 ## Phase 3 (MCP)
 
 ### The `mcp-server` binary
@@ -482,65 +514,92 @@ stdin/stdout, so stdio is the transport that requires zero
 networking/ports/auth setup. Nothing may be printed to stdout (it belongs
 to the protocol); diagnostics go to stderr.
 
-Tool surface (names chosen in Phase 1 to match the queue command names):
+Tool surface:
 
-- **Read-only, execute directly:** `search_videos` (needs `YOUTUBE_API_KEY`
-  passed via the MCP client's `env` config), `get_video_formats` (no
-  configuration, same `StreamClient` as the app), `list_queue` (reads the
-  shared database).
-- **Queue-mutating, approval-gated:** `add_to_queue`, `start_download`,
-  `download_all`. These never execute in the server process — see below.
+- **Read-only:** `search_videos` (needs `YOUTUBE_API_KEY` passed via the
+  MCP client's `env` config), `get_video_formats` (no configuration, same
+  `StreamClient` as the app), `list_queue` (reads the shared database).
+- **Queue-mutating, execute directly:** `add_to_queue`,
+  `add_mp3_to_queue`, `remove_from_queue`.
+- **Download-starting:** none. Deliberately — see below.
 
 Every tool call re-reads `settings.json` and refuses to serve when the
 user has turned off "Allow AI agent access (MCP server)"
 (`AppSettings.mcp_enabled`, default true). Re-reading per call (a tiny
 local file, called at human/agent frequency) means toggling the setting in
 the app takes effect immediately with no restart or cross-process signal.
+That switch is the one remaining gate, and it is wholesale: on or off.
 
-`add_to_queue` resolves the video itself (`get_video_formats` internally)
-instead of accepting agent-supplied title/quality strings: the itag is
-validated against the video's real format list (failing with the available
-itags listed), and the pending action's title/quality come from YouTube,
-so the approval prompt the user reads describes the actual video rather
-than whatever the agent claimed. `output_path` falls back to the user's
-default output folder from settings.
+### Where the agent boundary sits (decided: at the download, not the queue)
 
-### Pending agent actions (the approval gate)
+The original Phase 3 design routed every queue mutation through a
+`pending_agent_actions` table that the user approved one row at a time in
+an `AgentActionsPanel`. That was replaced: enqueueing now executes
+immediately, and the boundary moved to the *download*.
 
-Requirement: any tool that mutates the queue or starts a download must not
-execute unattended. Mechanism: a `pending_agent_actions` table in the same
-shared `queue.sqlite3`, managed by `core::agent`. The MCP server's mutating
-tools *only insert a `pending` row* (kind + JSON payload + requesting
-client's self-reported name) and return an `awaiting_user_approval` result;
-the shared database doubles as the request channel, so no IPC between the
-two processes exists at all, and requests filed while the app is closed
-simply wait.
+The reasoning is that the two operations have very different blast radii.
+Adding a queue row costs nothing irreversible — the entry is visible in the
+sidebar, its format can be changed, and it can be removed, all before any
+byte moves. Starting a download spends bandwidth, writes media files to
+disk, and (for MP3 entries) runs ffmpeg. Gating the cheap, reversible,
+high-frequency operation produced a steady stream of approval prompts that
+carried little information and trained the user to click through them,
+while the expensive operation was gated by the *same* prompt and got the
+same reflexive click.
 
-The desktop app polls unresolved actions every 2 seconds
-(`list_pending_agent_actions` command → `AgentActionsPanel` above the
-queue sidebar). Polling rather than events because the writer is another
-process — Tauri's event system can't reach across it, and a filesystem
-watcher on the SQLite file would be both noisier and less portable than a
-2-second `SELECT` against a local database.
+So the queue is now the review surface itself. An agent proposes by
+filling it; the user reviews the actual proposal — real titles, real
+formats, real destination — and either edits it, empties it, or clicks
+"Download all". One deliberate action, taken with the whole batch in view,
+replaces N prompts taken one at a time with no context.
 
-Approval (`approve_agent_action`) atomically claims the row with a
-conditional `UPDATE ... WHERE status = 'pending'` (`Pending` → `Approved`),
-so a double-click, a second window, or any other race can never execute
-one action twice — the loser gets an "already approved/rejected" error.
-Execution then goes through the *same guarded helpers the UI's own buttons
-use* (`add_to_queue`'s store insert; `start_download`'s
-`spawn_download`, including the `running_downloads` registry and
-batch-exclusivity guard; `download_all`'s `run_batch_guarded`), and the
-outcome lands back on the row (`Completed`, or `Failed` + message — the
-agent can file a fresh request). `Rejected` rows keep their payload for
-the record but nothing ever executes them. The status machine is
-deliberately one-way: `Pending → Approved → Completed/Failed` or
-`Pending → Rejected`, nothing returns to `Pending`.
+Critically, this is enforced by the **tool surface**, not by a runtime
+check: `mcp-server` exposes no tool that can start a transfer, so there is
+no code path — buggy, malicious, or prompt-injected — by which an agent
+starts one. The previous design's approval check was a condition that had
+to hold; this is a capability that does not exist. `core::download` isn't
+even reachable from the server binary's tool router.
 
-`requested_by` is the MCP client's self-reported `clientInfo.name` from
-the initialize handshake — useful display context ("Requested by
-claude-desktop"), but not an authenticated identity, and the UI treats it
-as informational only.
+Consequences elsewhere:
+
+- `core::agent`, the `pending_agent_actions` table, the three
+  `*_agent_action` commands, and the `AgentActionsPanel`/`useAgentActions`
+  frontend are all deleted. Databases created by older versions keep the
+  now-unused table; `ensure_schema` doesn't drop it, since a destructive
+  migration for dead weight is a bad trade.
+- The queue query polls every 3 seconds (`useQueue`). The writer is
+  another *process*, so Tauri's event system can't reach across it and
+  agent-added entries would otherwise not appear until something else
+  triggered a refetch. Same reasoning the old agent-action poll used.
+- `requested_by` is gone with the table. It was the MCP client's
+  self-reported `clientInfo.name` — never an authenticated identity, and
+  with no per-action prompt left to label, nothing to display it on.
+
+### Batch tools and token cost
+
+`add_to_queue` and `add_mp3_to_queue` both take `videos: [...]`, a list,
+rather than a single video. An agent queueing a ten-track album spends one
+tool call, not ten — ten round-trips of tool-call JSON plus ten result
+payloads is a real token cost for the agent and a real latency cost for
+the user, and nothing about the operation needs to be serialized per video.
+Per-video failures don't sink the batch: `core::enqueue::enqueue_videos`
+resolves each video independently and reports failures in `skipped`
+alongside the entries that made it into `added`.
+
+`add_mp3_to_queue` exists as its own tool rather than as
+`add_to_queue(quality: "mp3")` (which also works) because MP3 is the
+common request — "download these songs" — and a tool whose name and
+description say exactly that gets selected more reliably than an enum
+value buried in another tool's parameter schema.
+
+Neither tool asks for an itag. They take a `FormatPreference`
+(`best_progressive` / `best_audio_only` / `mp3`, defaulting to the user's
+configured default quality) and resolve it against each video's real
+format list server-side. Agents don't have to call `get_video_formats`
+first — saving another round-trip per video — and can't queue an itag the
+video doesn't offer. `output_path` falls back to the user's default output
+folder, then to the OS Downloads folder, so the common case needs no path
+at all.
 
 ### Packaging: mcp-server as a Tauri sidecar
 

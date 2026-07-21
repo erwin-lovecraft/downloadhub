@@ -1,6 +1,6 @@
 //! [`StreamClient`], the thin wrapper over `y7dl::Client`.
 
-use super::models::{select_format, FormatPreference, FormatSummary, VideoDetail};
+use super::models::{select_format, FormatPreference, FormatSummary, ResolvedFormat, VideoDetail};
 use super::StreamError;
 
 /// Thin wrapper over `y7dl::Client`. Reuse one instance across lookups: the
@@ -32,10 +32,11 @@ impl StreamClient {
     }
 
     /// Fetches a video's formats and picks the one matching `preference`.
-    /// Used for playlist import, where asking the user to pick an exact
-    /// itag per video isn't practical. Returns [`StreamError::FormatNotFound`]
-    /// if nothing matches (e.g. `BestProgressive` on a video YouTube only
-    /// serves as separate video/audio DASH streams).
+    /// Used wherever asking the user to pick an exact itag per video isn't
+    /// practical (playlist import, MCP enqueueing, bulk re-format). Returns
+    /// [`StreamError::FormatNotFound`] if nothing matches (e.g.
+    /// `BestProgressive` on a video YouTube only serves as separate
+    /// video/audio DASH streams).
     pub async fn resolve_preferred_format(
         &self,
         url_or_id: &str,
@@ -46,6 +47,24 @@ impl StreamClient {
             .cloned()
             .ok_or(StreamError::FormatNotFound)?;
         Ok((detail, format))
+    }
+
+    /// [`Self::resolve_preferred_format`] reduced to just the fields a queue
+    /// row needs — including the `convert_to_mp3` flag, which is a property
+    /// of the *preference*, not of the selected stream. The one place that
+    /// pairing is decided, so enqueueing and re-formatting can't drift.
+    pub async fn resolve_queue_format(
+        &self,
+        url_or_id: &str,
+        preference: FormatPreference,
+    ) -> Result<(VideoDetail, ResolvedFormat), StreamError> {
+        let (detail, format) = self.resolve_preferred_format(url_or_id, preference).await?;
+        let resolved = ResolvedFormat {
+            itag: format.itag,
+            quality_label: format.quality_label,
+            convert_to_mp3: preference.convert_to_mp3(),
+        };
+        Ok((detail, resolved))
     }
 
     /// Fetches raw `y7dl` video metadata (including formats with their

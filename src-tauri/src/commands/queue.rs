@@ -6,7 +6,9 @@
 //! same underlying `downloadhub_core::queue` operations without renaming.
 
 use crate::state::AppState;
-use downloadhub_core::queue::{NewQueueEntry, QueueEntry};
+use downloadhub_core::enqueue::{self, ReformatOutcome};
+use downloadhub_core::queue::{NewQueueEntry, QueueEntry, QueueStatus};
+use downloadhub_core::stream::{FormatPreference, ResolvedFormat};
 use tauri::State;
 
 #[tauri::command]
@@ -42,6 +44,67 @@ pub async fn list_queue(state: State<'_, AppState>) -> Result<Vec<QueueEntry>, S
         .list_entries()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Repoints one entry at an exact format the user picked from that video's
+/// own format list, resetting it to `Queued`. The precise counterpart to
+/// [`set_queue_entries_quality`], which can only work in preferences
+/// because a multi-select spans videos with different itags.
+#[tauri::command]
+pub async fn set_queue_entry_format(
+    queue_id: i64,
+    itag: u32,
+    quality_label: Option<String>,
+    convert_to_mp3: bool,
+    state: State<'_, AppState>,
+) -> Result<QueueEntry, String> {
+    state.ensure_no_batch_running()?;
+    let store = state.queue_store()?;
+
+    // Changing the format under a running download would leave the task
+    // writing the old stream to a path derived from the new one.
+    match store.get_entry(queue_id).await.map_err(|e| e.to_string())? {
+        Some(entry) if entry.status == QueueStatus::Downloading => {
+            return Err("This entry is downloading; cancel it before changing its format.".into());
+        }
+        Some(_) => {}
+        None => return Err("That queue entry no longer exists.".to_string()),
+    }
+
+    store
+        .set_format(
+            queue_id,
+            &ResolvedFormat {
+                itag,
+                quality_label,
+                convert_to_mp3,
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "That queue entry no longer exists.".to_string())
+}
+
+/// Re-resolves several entries against a single quality preference (the
+/// "update all selected" path). Each video's formats are looked up
+/// individually, so this makes one network round-trip per entry; entries
+/// that fail to resolve are reported in `skipped` rather than sinking the
+/// whole update.
+#[tauri::command]
+pub async fn set_queue_entries_quality(
+    queue_ids: Vec<i64>,
+    preference: FormatPreference,
+    state: State<'_, AppState>,
+) -> Result<ReformatOutcome, String> {
+    state.ensure_no_batch_running()?;
+    enqueue::reformat_entries(
+        &state.stream_client,
+        state.queue_store()?,
+        &queue_ids,
+        preference,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Removes an entry from the queue. If a download is currently running for

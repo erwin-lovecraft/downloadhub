@@ -8,17 +8,16 @@
 //! - `youtube`: YouTube Data API v3 client (search, playlists, metadata)
 //! - `stream`: `y7dl` wrapper for format/quality resolution and download
 //! - `queue`: download queue state machine + SQLite persistence
+//! - `enqueue`: bulk add/re-format driven by a `FormatPreference`
 //! - `download`: download orchestrator, progress reporting, resume support
 //! - `auth`: Google OAuth token acquisition/storage (via `keyring`)
-//! - `agent`: pending agent actions (MCP requests awaiting user approval)
 //! - `paths`: shared app-data-dir resolution for both binaries
 //! - `secrets`: credential resolution (runtime env, then compile-time embed)
 
-pub mod agent;
 pub mod auth;
 pub mod download;
+pub mod enqueue;
 pub mod paths;
-pub mod playlist;
 pub mod queue;
 pub mod secrets;
 pub mod settings;

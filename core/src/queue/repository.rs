@@ -12,7 +12,7 @@ use rusqlite::{Connection, Row};
 
 use super::entry::{NewQueueEntry, QueueEntry, QueueStatus};
 
-pub(crate) fn now_unix() -> i64 {
+fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -81,6 +81,34 @@ impl<'c> QueueRepository<'c> {
         ))?;
         let rows = stmt.query_map([], row_to_entry)?;
         rows.collect()
+    }
+
+    /// Repoints an entry at a different stream format and resets it to
+    /// `Queued` with its error cleared: the previous format's failure (or
+    /// cancellation) says nothing about the new one, and a `Completed`
+    /// entry re-formatted is a request to fetch it again. Returns `None`
+    /// if the entry doesn't exist.
+    pub(crate) fn set_format(
+        &self,
+        id: i64,
+        itag: u32,
+        quality_label: Option<String>,
+        convert_to_mp3: bool,
+    ) -> Result<Option<QueueEntry>, rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE queue_entries
+                SET itag = ?1, quality_label = ?2, convert_to_mp3 = ?3,
+                    status = ?4, error_message = NULL
+             WHERE id = ?5",
+            rusqlite::params![
+                itag,
+                quality_label,
+                convert_to_mp3,
+                QueueStatus::Queued.as_str(),
+                id,
+            ],
+        )?;
+        self.get(id)
     }
 
     pub(crate) fn set_status(

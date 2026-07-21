@@ -3,7 +3,6 @@ import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SearchPanel } from "@/components/SearchPanel";
 import { QueuePanel } from "@/components/QueuePanel";
-import { AgentActionsPanel } from "@/components/AgentActionsPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { UpdateChecker } from "@/components/UpdateChecker";
 import { useDownloadProgressListener } from "@/hooks/useDownloadProgressListener";
@@ -33,7 +32,6 @@ function App() {
         </section>
 
         <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-hidden border-l pl-6">
-          <AgentActionsPanel />
           <QueuePanel />
         </aside>
       </div>

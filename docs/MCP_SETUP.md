@@ -4,10 +4,11 @@ DownloadHub ships an MCP (Model Context Protocol) server binary so external
 AI agents — Claude Desktop, Claude Code, Gemini CLI, Codex CLI, or anything
 else that speaks MCP over stdio — can search YouTube and propose downloads.
 
-**Nothing an agent asks for runs unattended.** Tools that would change the
-queue or start a download only record a *pending request*; you approve or
-reject each one in the running DownloadHub desktop app (the "AI agent
-requests" panel above the download queue). Read-only tools answer directly.
+**No agent can download anything.** Agents can search, and they can add
+entries to your download queue — that part happens immediately, with no
+approval prompt. But the server exposes no tool that starts a transfer:
+nothing is downloaded until *you* open the DownloadHub desktop app, look at
+what's queued, and click **Download all**. The queue is the review step.
 
 ## 1. Get the server binary
 
@@ -110,28 +111,34 @@ Read-only (execute directly):
   resolution, size) for a video URL or id.
 - `list_queue` — the download queue with per-entry status.
 
-Approval-gated (record a pending request; nothing happens until you approve
-it in the desktop app):
+Queue-changing (take effect immediately — but download nothing):
 
-- `add_to_queue` — `video` + `itag` (+ optional `output_path`, defaulting
-  to your configured default output folder). The server resolves the
-  video's real title/quality itself, so the approval prompt describes the
-  actual video rather than trusting the agent's wording.
-- `start_download` — start one existing queue entry by `queue_id`.
-- `download_all` — download every queued entry, sequentially.
+- `add_to_queue` — `videos` (a **list** of URLs or ids), optional `quality`
+  (`best_progressive` / `best_audio_only` / `mp3`, defaulting to your
+  configured default quality), optional `output_path` (defaulting to your
+  default output folder, then your OS Downloads folder).
+- `add_mp3_to_queue` — same, fixed to MP3. The right tool for music.
+- `remove_from_queue` — drop entries by id, to undo a mistaken add.
 
-## 5. The approval flow
+The add tools resolve each video's actual formats server-side, so agents
+never pass an itag and can't queue one a video doesn't offer. Both take a
+list so queueing an album costs one call rather than one per track.
 
-1. The agent calls e.g. `add_to_queue`; the tool result says the request is
-   `awaiting_user_approval`.
-2. Open (or switch to) the DownloadHub desktop app. The "AI agent requests"
-   panel lists the request with what it will do and which client asked.
-3. **Approve** executes it exactly as if you'd clicked the equivalent
-   button yourself (same guards — e.g. it's refused while a batch download
-   runs); **Reject** discards it. Either way the decision is recorded, and
-   an already-decided request can never execute again or twice.
-4. The agent sees the outcome by calling `list_queue`.
+There is intentionally **no** `start_download` or `download_all` tool.
 
-Pending requests are stored in the shared queue database, so the desktop
-app doesn't need to be running when the agent makes the request — the
-requests simply wait until you next open the app.
+## 5. How a session goes
+
+1. You ask your agent for something ("queue the top 5 lo-fi mixes as MP3").
+2. It calls `search_videos`, then `add_mp3_to_queue` once with all five.
+   The tool result confirms what was queued and tells the agent to send you
+   to the app.
+3. You open DownloadHub. The five entries are in the queue sidebar with
+   real titles and formats. Change a format, drop one you don't want, then
+   click **Download all**.
+
+The queue lives in a database shared by both processes, so the desktop app
+doesn't need to be running when the agent queues things — the entries are
+simply waiting the next time you open it.
+
+To turn agent access off entirely, uncheck **Allow AI agent access (MCP
+server)** in Settings; every tool then refuses, with no restart needed.
