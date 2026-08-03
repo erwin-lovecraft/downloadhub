@@ -275,35 +275,66 @@ error message, exactly as an individually-started failure would; the loop just
 doesn't stop there. Only a `QueueStore` failure stops the batch early, since
 that affects every remaining entry too.
 
-The `download_all` command takes two callbacks: `on_progress` (the same
+The `run_all_queued` call takes two callbacks: `on_progress` (the same
 throttled shape `start_download` wires to `download-progress`) and
 `on_item_done`, fired once per entry after its `run_download` resolves. Without
-the second, only the batch's return value would signal completion — but
+the second, only the batch's outcome would signal completion — but
 `useDownloadProgressListener` reacts to a per-*entry* `completed`/`failed`
 event to clear that entry's progress bar and resync its status, so
 `on_item_done` lets the command emit the same per-entry event for batch
 downloads as for individual ones, and the same listener handles both unchanged.
 
-Unlike `start_download`, `download_all` awaits the whole batch rather than
-spawning and returning. This is a deliberate simplification: the frontend's
-mutation `isPending` then reflects "a batch is running" for its true duration
-with no extra polling or state, and per-entry progress events still stream out
-continuously via the callbacks — nothing about the live progress UI requires
-the command to return early.
+### One-worker job model, and stopping mid-batch
+
+`download_all` spawns the batch as a single background task and returns its
+job id immediately — the same fire-and-forget shape as `start_download`,
+rather than awaiting the whole batch the way an earlier version of this
+command did. `AppState` keeps a `Mutex<HashMap<u64, CancellationToken>>`
+(`register_batch_job`/`cancel_batch_job`/`finish_batch_job`) as a one-worker
+job registry: `spawn_batch` allocates a job id and a fresh
+`tokio_util::sync::CancellationToken`, registers the pair, and hands a clone
+of the token into `run_all_queued`. `stop_download_all(job_id)` looks the id
+up and calls `.cancel()` on its token — it doesn't touch the task itself,
+same as how `cancel_download` acts through a handle rather than reaching into
+`run_download`.
+
+`run_all_queued` checks `cancel.is_cancelled()` *between* entries, never
+mid-transfer, so stopping a 100-item batch after item 11 completes lets item
+11 finish (download, transcode, delete-the-m4a — whatever `run_download`
+already had underway) and simply never starts item 12; it does not abort item
+11 the way `cancel_download` aborts an individually-started one. This mirrors
+`run_all_queued`'s existing "continue past failures" philosophy: the loop, not
+the in-flight entry, is what gets interrupted. `CancellationToken` is
+re-exported from `core::download` (`core` otherwise has no reason to depend on
+`tokio-util` beyond this one type) so `src-tauri` never takes its own direct
+dependency just to hand `run_all_queued` a token.
+
+Because the command no longer awaits the batch, its return value can't carry
+the final `BatchDownloadOutcome` — the spawned task emits it instead, as one
+`download-batch-done` event (`{ job_id, completed, failed, stopped,
+error_message }`) once `run_all_queued` resolves, alongside deregistering the
+job and clearing `batch_running`. The frontend's `useBatchDownloadStore`
+(read via `useQueue`'s `batchJobId`/`batchOutcome`) tracks "a batch is
+running" from the id `download_all` returns until that event arrives for the
+same id, mirroring how `useDownloadProgressStore` tracks individual entries.
 
 `AppState.batch_running` (an `AtomicBool`, *swapped* rather than
 checked-then-set, to close the race between two concurrent `download_all`
 calls) guards against a second batch, and
 `start_download`/`cancel_download`/`remove_from_queue` all refuse to run while
 it's set (`AppState::ensure_no_batch_running`). This isn't polish:
-`download_all` calls `run_download` directly rather than through the
-`running_downloads` abort-handle registry, so an individual command racing
-against the batch's handling of the *same* entries has no safe outcome —
-especially `cancel_download`, which would find no handle to abort and might
-flip a status the batch is about to overwrite. Refusing outright is far simpler
-than reconciling the two. `download_all` also checks `running_downloads` is
-empty before starting, closing the reverse case (imperfectly, given the
-inherent TOCTOU race across two independently-locked pieces of state).
+`download_all` runs its batch job directly against the store rather than
+through the `running_downloads` abort-handle registry, so an individual
+command racing against the batch's handling of the *same* entries has no safe
+outcome — especially `cancel_download`, which would find no handle to abort
+and might flip a status the batch is about to overwrite. Refusing outright is
+far simpler than reconciling the two. `download_all` also checks
+`running_downloads` is empty before starting, closing the reverse case
+(imperfectly, given the inherent TOCTOU race across two independently-locked
+pieces of state). This flag is a separate concern from the `batch_jobs`
+registry above — `batch_jobs` exists purely for `stop_download_all` to look a
+token up by id; only one job is ever in it at a time because `batch_running`
+already refuses a second one.
 
 ## MP3 download (transcode via ffmpeg)
 

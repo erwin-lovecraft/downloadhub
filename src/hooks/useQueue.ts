@@ -7,8 +7,9 @@ import {
   setQueueEntriesQuality,
   setQueueEntryFormat,
 } from "@/lib/queue";
-import { cancelDownload, downloadAll, startDownload } from "@/lib/download";
+import { cancelDownload, downloadAll, startDownload, stopDownloadAll } from "@/lib/download";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
+import { useBatchDownloadStore } from "@/lib/batchDownload";
 
 export const queueQueryKey = ["queue", "list"] as const;
 
@@ -25,6 +26,9 @@ export function useQueue() {
   const queryClient = useQueryClient();
   const clearProgress = useDownloadProgressStore((s) => s.clearProgress);
   const clearAllProgress = useDownloadProgressStore((s) => s.clearAllProgress);
+  const batchJobId = useBatchDownloadStore((s) => s.runningJobId);
+  const batchOutcome = useBatchDownloadStore((s) => s.lastOutcome);
+  const setBatchRunning = useBatchDownloadStore((s) => s.setRunning);
 
   const list = useQuery({
     queryKey: queueQueryKey,
@@ -55,7 +59,14 @@ export function useQueue() {
       invalidate();
     },
   });
-  const downloadAllMutation = useMutation({ mutationFn: downloadAll, onSuccess: invalidate });
+  const downloadAllMutation = useMutation({
+    mutationFn: downloadAll,
+    // The command only starts the batch worker and hands back its job id;
+    // `useBatchDownloadListener` learns the outcome later from the
+    // `download-batch-done` event carrying that same id.
+    onSuccess: (jobId) => setBatchRunning(jobId),
+  });
+  const stopDownloadAllMutation = useMutation({ mutationFn: stopDownloadAll });
   const setFormat = useMutation({ mutationFn: setQueueEntryFormat, onSuccess: invalidate });
   const setQuality = useMutation({ mutationFn: setQueueEntriesQuality, onSuccess: invalidate });
 
@@ -67,6 +78,9 @@ export function useQueue() {
     remove,
     clear,
     downloadAll: downloadAllMutation,
+    stopDownloadAll: stopDownloadAllMutation,
+    batchJobId,
+    batchOutcome,
     setFormat,
     setQuality,
   };

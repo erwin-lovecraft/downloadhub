@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use downloadhub_core::download::CancellationToken;
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
 use downloadhub_transcode::Transcoder;
@@ -31,12 +32,22 @@ pub struct AppState {
     pub running_downloads: Mutex<HashMap<i64, tauri::async_runtime::JoinHandle<()>>>,
     /// True while `download_all` is sequentially processing the queue.
     /// `start_download`/`cancel_download`/`remove_from_queue` all refuse to
-    /// run while this is set, since `download_all` calls `run_download`
-    /// directly rather than through the `running_downloads` registry —
-    /// racing an individual command against the batch's own handling of
-    /// the same entries wouldn't be safe (see `docs/ARCHITECTURE.md`,
-    /// "Download all").
+    /// run while this is set, since `download_all` runs its batch job
+    /// directly against the store rather than through the
+    /// `running_downloads` registry — racing an individual command against
+    /// the batch's own handling of the same entries wouldn't be safe (see
+    /// `docs/ARCHITECTURE.md`, "Download all").
     pub batch_running: AtomicBool,
+    /// One-worker job registry for batch downloads: `download_all` spawns
+    /// the batch as a background task (mirroring `start_download`'s
+    /// fire-and-forget shape) and registers its `CancellationToken` here
+    /// under a freshly allocated job id, so `stop_download_all(job_id)` can
+    /// cancel it without needing a handle to the task itself. The task
+    /// removes its own entry when it finishes, same as `running_downloads`.
+    /// `batch_running` still gates concurrency to one job at a time — this
+    /// map exists for lookup-by-id, not for tracking "is a batch running".
+    batch_jobs: Mutex<HashMap<u64, CancellationToken>>,
+    next_batch_job_id: AtomicU64,
 }
 
 impl AppState {
@@ -58,6 +69,8 @@ impl AppState {
                 .map(downloadhub_core::paths::settings_path),
             running_downloads: Mutex::new(HashMap::new()),
             batch_running: AtomicBool::new(false),
+            batch_jobs: Mutex::new(HashMap::new()),
+            next_batch_job_id: AtomicU64::new(1),
         }
     }
 
@@ -117,11 +130,54 @@ impl AppState {
     /// entry, since those would race with the batch's own handling of the
     /// same entries.
     pub fn ensure_no_batch_running(&self) -> Result<(), String> {
-        if self.batch_running.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.batch_running.load(Ordering::SeqCst) {
             Err("A batch download is in progress; wait for it to finish.".to_string())
         } else {
             Ok(())
         }
+    }
+
+    /// Allocates a job id for a newly spawned batch task and registers its
+    /// cancellation token under it. Call this before spawning the task so
+    /// `stop_download_all` can find the job the instant `download_all`
+    /// returns the id to its caller.
+    pub fn register_batch_job(&self, cancel: CancellationToken) -> u64 {
+        let job_id = self.next_batch_job_id.fetch_add(1, Ordering::SeqCst);
+        self.batch_jobs
+            .lock()
+            .expect("batch jobs mutex poisoned")
+            .insert(job_id, cancel);
+        job_id
+    }
+
+    /// Cancels `job_id`'s token if it's still registered. `Err` means no
+    /// batch is running under that id — either it already finished, or the
+    /// id was never valid.
+    pub fn cancel_batch_job(&self, job_id: u64) -> Result<(), String> {
+        match self
+            .batch_jobs
+            .lock()
+            .expect("batch jobs mutex poisoned")
+            .get(&job_id)
+        {
+            Some(cancel) => {
+                cancel.cancel();
+                Ok(())
+            }
+            None => Err(
+                "No batch download is running under that id (it may have already finished)."
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// Deregisters `job_id`. Called by the batch task itself once its run
+    /// resolves, same as `running_downloads` entries removing themselves.
+    pub fn finish_batch_job(&self, job_id: u64) {
+        self.batch_jobs
+            .lock()
+            .expect("batch jobs mutex poisoned")
+            .remove(&job_id);
     }
 }
 

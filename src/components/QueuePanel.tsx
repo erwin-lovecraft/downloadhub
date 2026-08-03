@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DownloadIcon, SquareStopIcon, Trash2Icon } from "lucide-react";
 import { useQueue } from "@/hooks/useQueue";
 import { useDownloadProgressStore } from "@/lib/downloadProgress";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,18 @@ function formatDescription(entry: QueueEntry): string {
 }
 
 export function QueuePanel() {
-  const { list, start, cancel, remove, clear, downloadAll, setQuality } = useQueue();
+  const {
+    list,
+    start,
+    cancel,
+    remove,
+    clear,
+    downloadAll,
+    stopDownloadAll,
+    batchJobId,
+    batchOutcome,
+    setQuality,
+  } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -40,7 +52,13 @@ export function QueuePanel() {
   const entries = list.data ?? [];
   const queued = entries.filter((entry) => entry.status === "queued");
   const hasQueued = queued.length > 0;
-  const batchRunning = downloadAll.isPending;
+  // True from the moment `download_all` is clicked (its own invoke is
+  // in flight) through to the `download-batch-done` event landing for the
+  // job it started — the worker task itself may still be running an entry
+  // to completion well after the `stop_download_all` call that cancelled
+  // its token has already resolved.
+  const batchRunning = downloadAll.isPending || batchJobId !== null;
+  const stopRequested = stopDownloadAll.isSuccess && stopDownloadAll.variables === batchJobId;
 
   // An entry can only be re-formatted while it isn't mid-transfer; the
   // backend enforces this too, but greying the checkbox explains why.
@@ -72,8 +90,8 @@ export function QueuePanel() {
 
   return (
     <div className="flex h-full flex-col gap-3">
+      <span className="text-sm font-semibold">Download queue</span>
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <span className="text-sm font-semibold">Download queue</span>
         <div className="flex items-center gap-2">
           <Button
             size="xs"
@@ -85,16 +103,32 @@ export function QueuePanel() {
               }
             }}
           >
+            <Trash2Icon />
             {clear.isPending ? "Clearing..." : "Clear queue"}
           </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={!hasQueued || batchRunning}
-            onClick={() => downloadAll.mutate()}
-          >
-            {batchRunning ? "Downloading..." : "Download all"}
-          </Button>
+          {batchRunning ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={batchJobId === null || stopRequested || stopDownloadAll.isPending}
+              onClick={() => {
+                if (batchJobId !== null) stopDownloadAll.mutate(batchJobId);
+              }}
+            >
+              <SquareStopIcon />
+              {stopRequested ? "Stopping..." : "Stop"}
+            </Button>
+          ) : (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!hasQueued}
+              onClick={() => downloadAll.mutate()}
+            >
+              <DownloadIcon />
+              Download all
+            </Button>
+          )}
         </div>
       </div>
 
@@ -177,16 +211,32 @@ export function QueuePanel() {
         </p>
       )}
 
+      {stopDownloadAll.error && (
+        <p className="shrink-0 text-sm text-destructive">
+          {stopDownloadAll.error instanceof Error
+            ? stopDownloadAll.error.message
+            : String(stopDownloadAll.error)}
+        </p>
+      )}
+
       {clear.error && (
         <p className="shrink-0 text-sm text-destructive">
           {clear.error instanceof Error ? clear.error.message : String(clear.error)}
         </p>
       )}
 
-      {downloadAll.data && !batchRunning && (
+      {batchOutcome && !batchRunning && (
         <p className="shrink-0 text-sm text-muted-foreground">
-          Batch finished: {downloadAll.data.completed} completed
-          {downloadAll.data.failed > 0 ? `, ${downloadAll.data.failed} failed` : ""}.
+          {batchOutcome.error_message ? (
+            `Batch failed: ${batchOutcome.error_message}`
+          ) : (
+            <>
+              {batchOutcome.stopped ? "Batch stopped: " : "Batch finished: "}
+              {batchOutcome.completed} completed
+              {batchOutcome.failed > 0 ? `, ${batchOutcome.failed} failed` : ""}
+              {batchOutcome.stopped ? ", remaining queued entries left untouched" : ""}.
+            </>
+          )}
         </p>
       )}
 

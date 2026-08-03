@@ -24,7 +24,7 @@ CLI hardcodes that folder when resolving `tauri.conf.json`.
 | `youtube` | `search_videos`, `list_playlist_items` |
 | `video` | `get_video_formats` |
 | `queue` | `add_to_queue`, `list_queue`, `remove_from_queue`, `clear_queue`, `set_queue_entry_format`, `set_queue_entries_quality` |
-| `download` | `start_download`, `cancel_download`, `download_all` |
+| `download` | `start_download`, `cancel_download`, `download_all`, `stop_download_all` |
 | `playlist` | `import_playlist_to_queue` |
 | `settings` | `get_settings`, `save_settings` |
 | `mcp` | `mcp_server_path` |
@@ -56,17 +56,23 @@ Two invariants worth preserving:
 
 ## Events
 
-`download-progress` is the only event. `start_download` spawns onto
-`tauri::async_runtime` and returns immediately — its `Result` says whether the
-download could be *started*, not how it ended — while `download_all` awaits the
-whole batch and emits the same per-entry events via `on_item_done`, so the
-frontend listener handles both unchanged.
+Two events. `download-progress` reports per-entry progress/completion/failure;
+both `start_download` and `download_all` spawn onto `tauri::async_runtime` and
+return immediately, so this is the only way either surfaces how a download
+actually ended — `download_all` emits the same per-entry events via
+`on_item_done`, so the frontend listener handles both unchanged. `download_all`
+additionally emits `download-batch-done` once, when its spawned batch task
+finishes, carrying the job id it originally returned plus the tallied
+`BatchDownloadOutcome` — see `docs/ARCHITECTURE.md`, "One-worker job model,
+and stopping mid-batch", for the job-id/`CancellationToken` registry behind
+`stop_download_all`.
 
 ## Frontend
 
 Lives in top-level `src/` (Vite/React), not here. TanStack Query owns server
-state; a small Zustand store holds transient per-entry download progress.
-`useQueue` polls every 3 seconds because `mcp-server` writes the queue from
+state; small Zustand stores hold transient per-entry download progress and
+batch-job status. `useQueue` polls every 3 seconds because `mcp-server` writes
+the queue from
 another *process*, which Tauri events can't reach across.
 
 ## Capabilities

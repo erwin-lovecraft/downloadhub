@@ -21,6 +21,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::download::start_download,
             commands::download::cancel_download,
             commands::download::download_all,
+            commands::download::stop_download_all,
             commands::playlist::import_playlist_to_queue,
             commands::settings::get_settings,
             commands::settings::save_settings,

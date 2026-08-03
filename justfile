@@ -30,6 +30,22 @@ dev:
 release: sidecar
     pnpm tauri build
 
+# The root VERSION file is the single source of truth; scripts/bump-version.mjs
+# copies it into the three places a version is otherwise duplicated:
+# package.json, the workspace `[workspace.package] version` in Cargo.toml
+# (which every crate's `version.workspace = true` inherits), and
+# src-tauri/tauri.conf.json (what Tauri actually builds/updates against —
+# package.json's copy is otherwise unused). Doesn't commit — review with
+# `git diff` and commit yourself, matching this repo's existing one-line
+# "Update version to X.Y.Z" commits.
+
+# Bump the app version everywhere it's declared. No argument bumps the patch
+# number; pass "major"/"minor"/"patch" or an explicit "x.y.z" to control it.
+# E.g. `just bump-version`, `just bump-version minor`, `just bump-version 2.0.0`.
+bump-version version="":
+    node scripts/bump-version.mjs {{version}}
+    cargo update -p downloadhub -p downloadhub-core -p downloadhub-transcode -p downloadhub-mcp-server
+
 # Sidecars live at src-tauri/binaries/<name>-<triple>[.exe] so `tauri
 # build` bundles them inside the desktop app — one installer ships
 # everything. mcp-server is built from this workspace; ffmpeg (used for
