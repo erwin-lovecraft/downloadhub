@@ -30,7 +30,7 @@ function formatDescription(entry: QueueEntry): string {
 }
 
 export function QueuePanel() {
-  const { list, start, cancel, remove, downloadAll, setQuality } = useQueue();
+  const { list, start, cancel, remove, clear, downloadAll, setQuality } = useQueue();
   const progressByQueueId = useDownloadProgressStore((s) => s.progress);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -74,14 +74,28 @@ export function QueuePanel() {
     <div className="flex h-full flex-col gap-3">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <span className="text-sm font-semibold">Download queue</span>
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={!hasQueued || batchRunning}
-          onClick={() => downloadAll.mutate()}
-        >
-          {batchRunning ? "Downloading..." : "Download all"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={entries.length === 0 || batchRunning || clear.isPending}
+            onClick={() => {
+              if (window.confirm("Remove all entries from the download queue?")) {
+                clear.mutate();
+              }
+            }}
+          >
+            {clear.isPending ? "Clearing..." : "Clear queue"}
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!hasQueued || batchRunning}
+            onClick={() => downloadAll.mutate()}
+          >
+            {batchRunning ? "Downloading..." : "Download all"}
+          </Button>
+        </div>
       </div>
 
       {selectable.length > 0 && (
@@ -160,6 +174,12 @@ export function QueuePanel() {
       {downloadAll.error && (
         <p className="shrink-0 text-sm text-destructive">
           {downloadAll.error instanceof Error ? downloadAll.error.message : String(downloadAll.error)}
+        </p>
+      )}
+
+      {clear.error && (
+        <p className="shrink-0 text-sm text-destructive">
+          {clear.error instanceof Error ? clear.error.message : String(clear.error)}
         </p>
       )}
 

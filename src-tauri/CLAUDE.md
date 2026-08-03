@@ -23,7 +23,7 @@ CLI hardcodes that folder when resolving `tauri.conf.json`.
 | --- | --- |
 | `youtube` | `search_videos`, `list_playlist_items` |
 | `video` | `get_video_formats` |
-| `queue` | `add_to_queue`, `list_queue`, `remove_from_queue`, `set_queue_entry_format`, `set_queue_entries_quality` |
+| `queue` | `add_to_queue`, `list_queue`, `remove_from_queue`, `clear_queue`, `set_queue_entry_format`, `set_queue_entries_quality` |
 | `download` | `start_download`, `cancel_download`, `download_all` |
 | `playlist` | `import_playlist_to_queue` |
 | `settings` | `get_settings`, `save_settings` |

@@ -125,3 +125,28 @@ pub async fn remove_from_queue(queue_id: i64, state: State<'_, AppState>) -> Res
         .await
         .map_err(|e| e.to_string())
 }
+
+/// Empties the entire queue. Any in-flight downloads are aborted first —
+/// otherwise they'd keep writing to files their queue records no longer
+/// exist for, same as `remove_from_queue` but for every entry at once.
+#[tauri::command]
+pub async fn clear_queue(state: State<'_, AppState>) -> Result<(), String> {
+    state.ensure_no_batch_running()?;
+
+    let handles: Vec<_> = state
+        .running_downloads
+        .lock()
+        .expect("running downloads mutex poisoned")
+        .drain()
+        .map(|(_, handle)| handle)
+        .collect();
+    for handle in handles {
+        handle.abort();
+    }
+
+    state
+        .queue_store()?
+        .clear_entries()
+        .await
+        .map_err(|e| e.to_string())
+}

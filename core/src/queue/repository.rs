@@ -127,6 +127,12 @@ impl<'c> QueueRepository<'c> {
         )?;
         Ok(())
     }
+
+    /// Deletes every entry. A no-op (not an error) if the queue is empty.
+    pub(crate) fn clear(&self) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM queue_entries", [])?;
+        Ok(())
+    }
 }
 
 fn row_to_entry(row: &Row<'_>) -> Result<QueueEntry, rusqlite::Error> {

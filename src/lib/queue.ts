@@ -33,6 +33,8 @@ export const listQueue = () => invoke<QueueEntry[]>("list_queue");
 export const removeFromQueue = (queueId: number) =>
   invoke<void>("remove_from_queue", { queueId });
 
+export const clearQueue = () => invoke<void>("clear_queue");
+
 export interface SetQueueEntryFormatParams {
   queueId: number;
   itag: number;

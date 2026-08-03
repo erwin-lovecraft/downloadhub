@@ -100,6 +100,11 @@ impl QueueStore {
         self.with_repository(move |repo| repo.delete(id)).await
     }
 
+    /// Deletes every entry. A no-op (not an error) if the queue is empty.
+    pub async fn clear_entries(&self) -> Result<(), QueueError> {
+        self.with_repository(|repo| repo.clear()).await
+    }
+
     /// Lists all entries, most recently added first.
     pub async fn list_entries(&self) -> Result<Vec<QueueEntry>, QueueError> {
         self.with_repository(|repo| repo.list()).await
@@ -297,5 +302,18 @@ mod tests {
 
         // Deleting again (or an id that never existed) is not an error.
         store.delete_entry(added.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn clear_entries_removes_everything_and_is_a_noop_when_empty() {
+        let store = QueueStore::open_in_memory().unwrap();
+        store.add_entry(new_entry("first")).await.unwrap();
+        store.add_entry(new_entry("second")).await.unwrap();
+
+        store.clear_entries().await.unwrap();
+        assert_eq!(store.list_entries().await.unwrap().len(), 0);
+
+        // Clearing an already-empty queue is not an error.
+        store.clear_entries().await.unwrap();
     }
 }

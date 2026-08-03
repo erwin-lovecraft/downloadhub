@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addToQueue,
+  clearQueue,
   listQueue,
   removeFromQueue,
   setQueueEntriesQuality,
@@ -23,6 +24,7 @@ const POLL_INTERVAL_MS = 3000;
 export function useQueue() {
   const queryClient = useQueryClient();
   const clearProgress = useDownloadProgressStore((s) => s.clearProgress);
+  const clearAllProgress = useDownloadProgressStore((s) => s.clearAllProgress);
 
   const list = useQuery({
     queryKey: queueQueryKey,
@@ -45,6 +47,14 @@ export function useQueue() {
     },
   });
   const remove = useMutation({ mutationFn: removeFromQueue, onSuccess: invalidate });
+  const clear = useMutation({
+    mutationFn: clearQueue,
+    onSuccess: () => {
+      // Every entry (and any progress event still lingering for it) is gone.
+      clearAllProgress();
+      invalidate();
+    },
+  });
   const downloadAllMutation = useMutation({ mutationFn: downloadAll, onSuccess: invalidate });
   const setFormat = useMutation({ mutationFn: setQueueEntryFormat, onSuccess: invalidate });
   const setQuality = useMutation({ mutationFn: setQueueEntriesQuality, onSuccess: invalidate });
@@ -55,6 +65,7 @@ export function useQueue() {
     start,
     cancel,
     remove,
+    clear,
     downloadAll: downloadAllMutation,
     setFormat,
     setQuality,
