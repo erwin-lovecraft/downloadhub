@@ -6,9 +6,11 @@ import { QueuePanel } from "@/components/QueuePanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { UpdateChecker } from "@/components/UpdateChecker";
 import { useDownloadProgressListener } from "@/hooks/useDownloadProgressListener";
+import { useBatchDownloadListener } from "@/hooks/useBatchDownloadListener";
 
 function App() {
   useDownloadProgressListener();
+  useBatchDownloadListener();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (

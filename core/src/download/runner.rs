@@ -3,6 +3,8 @@
 
 use std::time::Instant;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::queue::{QueueError, QueueStatus, QueueStore};
 use crate::stream::{StreamClient, StreamError};
 
@@ -84,6 +86,12 @@ pub async fn run_download(
 pub struct BatchDownloadOutcome {
     pub completed: usize,
     pub failed: usize,
+    /// True when `cancel` was cancelled before every `Queued` entry was
+    /// processed — i.e. a user-requested stop, not just running out of
+    /// entries. The entry in progress when the token was cancelled still
+    /// runs to completion; this only reflects whether the *next* one was
+    /// skipped.
+    pub stopped: bool,
 }
 
 /// Downloads every currently-`Queued` entry, one at a time (not
@@ -99,6 +107,15 @@ pub struct BatchDownloadOutcome {
 /// call, the batch fully finishes one entry — download, transcode, delete
 /// the m4a — before moving to the next.
 ///
+/// `cancel` is checked *between* entries, never mid-transfer: cancelling it
+/// stops the entry that's currently downloading from being the last one
+/// started, but lets it run to completion rather than aborting it (aborting
+/// an in-flight transfer is what `cancel_download` is for). This is what
+/// lets a caller stop a 100-item batch after the 11th without losing the
+/// bytes already in flight for it. The caller owns the token — this
+/// function only ever reads it — so a batch-runner task can hand a clone to
+/// whatever registry a "stop" command looks it up from.
+///
 /// `on_progress` reports throttled in-progress updates, same as
 /// `run_download`. `on_item_done` fires once per entry after its
 /// `run_download` call resolves (`Ok` on success, `Err`'s `to_string()` on
@@ -108,6 +125,7 @@ pub struct BatchDownloadOutcome {
 /// individually-started download.
 pub async fn run_all_queued(
     ctx: &DownloadContext<'_>,
+    cancel: &CancellationToken,
     mut on_progress: impl FnMut(DownloadProgress) + Send,
     mut on_item_done: impl FnMut(i64, Result<DownloadProgress, String>) + Send,
 ) -> Result<BatchDownloadOutcome, QueueError> {
@@ -118,6 +136,11 @@ pub async fn run_all_queued(
         .into_iter()
         .filter(|e| e.status == QueueStatus::Queued)
     {
+        if cancel.is_cancelled() {
+            outcome.stopped = true;
+            break;
+        }
+
         let result = run_download(entry.id, ctx, &mut on_progress).await;
         match &result {
             Ok(_) => outcome.completed += 1,
@@ -192,4 +215,69 @@ async fn download_entry(
         total_bytes,
         phase: DownloadPhase::Downloading,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::queue::{NewQueueEntry, QueueStore};
+    use crate::stream::StreamClient;
+
+    fn new_entry(video_id: &str) -> NewQueueEntry {
+        NewQueueEntry {
+            video_id: video_id.to_string(),
+            title: video_id.to_string(),
+            itag: 140,
+            quality_label: None,
+            output_path: "/tmp/downloadhub-test".to_string(),
+            convert_to_mp3: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pre_cancelled_token_stops_before_the_next_entry_starts() {
+        let store = QueueStore::open_in_memory().unwrap();
+        store.add_entry(new_entry("a")).await.unwrap();
+        store.add_entry(new_entry("b")).await.unwrap();
+
+        let ctx = DownloadContext {
+            stream_client: &StreamClient::new(),
+            store: &store,
+            transcoder: None,
+        };
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let outcome = run_all_queued(&ctx, &cancel, |_| {}, |_, _| {})
+            .await
+            .unwrap();
+
+        assert!(outcome.stopped);
+        assert_eq!(outcome.completed, 0);
+        assert_eq!(outcome.failed, 0);
+
+        // Neither entry was touched: a token already cancelled before the
+        // first iteration must never even start the entry that would've
+        // gone next, let alone call `run_download` on it.
+        let entries = store.list_entries().await.unwrap();
+        assert!(entries.iter().all(|e| e.status == QueueStatus::Queued));
+    }
+
+    #[tokio::test]
+    async fn an_uncancelled_token_with_an_empty_queue_finishes_without_stopping() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let ctx = DownloadContext {
+            stream_client: &StreamClient::new(),
+            store: &store,
+            transcoder: None,
+        };
+
+        let outcome = run_all_queued(&ctx, &CancellationToken::new(), |_| {}, |_, _| {})
+            .await
+            .unwrap();
+
+        assert!(!outcome.stopped);
+        assert_eq!(outcome.completed, 0);
+        assert_eq!(outcome.failed, 0);
+    }
 }
