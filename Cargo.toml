@@ -3,6 +3,6 @@ resolver = "2"
 members = ["core", "src-tauri", "mcp-server", "transcode"]
 
 [workspace.package]
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 license = "GPL-3.0-or-later"
