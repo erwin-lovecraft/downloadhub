@@ -1,6 +1,4 @@
-//! Thin Tauri command handlers for persisted app settings. All read/write
-//! logic lives in `downloadhub_core::settings`; this module just wires it
-//! up.
+//! Tauri commands for persisted app settings.
 
 use crate::state::AppState;
 use downloadhub_core::settings::{self, AppSettings};

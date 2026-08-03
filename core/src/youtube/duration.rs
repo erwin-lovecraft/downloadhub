@@ -1,6 +1,4 @@
-//! Minimal parser for the ISO 8601 durations `contentDetails.duration`
-//! returns (e.g. `PT4M13S`, `PT1H2M`, `P0D`). Only the components YouTube
-//! actually emits (days/hours/minutes/seconds) are handled.
+//! Parser for the ISO 8601 durations `contentDetails.duration` returns.
 
 pub fn parse_iso8601(s: &str) -> Option<u64> {
     let s = s.strip_prefix('P')?;

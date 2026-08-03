@@ -1,9 +1,4 @@
 //! The IPC-facing stream models and format-selection logic.
-//!
-//! `y7dl::Video`/`Format` don't derive `Serialize` (they're built from a
-//! `Deserialize`d player response), so these DTOs mirror them in a shape
-//! that crosses the Tauri IPC boundary as plain JSON, the same way
-//! `core::youtube` shapes `VideoSummary` from the raw API response.
 
 use serde::Serialize;
 

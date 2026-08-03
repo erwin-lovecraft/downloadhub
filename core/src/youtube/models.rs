@@ -1,5 +1,4 @@
-//! The public YouTube models exposed to callers (and across the Tauri IPC
-//! boundary), shaped from the raw API responses in `response`.
+//! The public YouTube models exposed to callers, shaped from raw API responses.
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VideoSummary {

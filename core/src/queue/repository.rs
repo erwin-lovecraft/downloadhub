@@ -1,10 +1,5 @@
-//! All SQL touching the `queue_entries` table, and nothing else.
-//!
-//! [`QueueRepository`] borrows an already-locked connection and is
-//! constructed fresh for each operation by [`QueueStore`](super::QueueStore)
-//! — it holds no state of its own, so creating and dropping one per call is
-//! free. Locking, `spawn_blocking`, and error wrapping are the store's job;
-//! this type only knows the table.
+//! All SQL touching the `queue_entries` table, and nothing else. Synchronous,
+//! on a connection already locked by `QueueStore`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

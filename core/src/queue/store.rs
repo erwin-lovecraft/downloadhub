@@ -1,8 +1,5 @@
-//! [`QueueStore`]: owns the SQLite connection and bridges the blocking
-//! `rusqlite` world into async. Every operation locks the connection inside
-//! `tokio::task::spawn_blocking` (so the runtime never stalls on I/O) and
-//! delegates the actual SQL to [`QueueRepository`] — this file knows nothing
-//! about tables or queries.
+//! `QueueStore`: owns the SQLite connection and bridges blocking `rusqlite`
+//! into async via `spawn_blocking`, delegating all SQL to `QueueRepository`.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

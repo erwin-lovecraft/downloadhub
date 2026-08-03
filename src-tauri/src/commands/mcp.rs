@@ -1,11 +1,5 @@
-//! Command exposing where the bundled `mcp-server` sidecar lives, so the
-//! Settings dialog can show the user the exact path (and a ready-to-paste
-//! MCP client config) to connect an external AI agent.
-//!
-//! The sidecar is bundled via `tauri.conf.json`'s `externalBin`, so at
-//! runtime it sits next to the main app executable (Tauri strips the
-//! target-triple suffix on bundling): `downloadhub.app/Contents/MacOS/`
-//! on macOS, the install directory on Windows/Linux.
+//! Command exposing the bundled `mcp-server` sidecar's path, so the Settings
+//! dialog can show a ready-to-paste MCP client config.
 
 use std::path::PathBuf;
 

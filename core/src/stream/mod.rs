@@ -1,8 +1,4 @@
 //! Video format/quality lookup via `y7dl`.
-//!
-//! - [`client`]: [`StreamClient`], the `y7dl::Client` wrapper
-//! - [`models`]: the IPC-facing DTOs (`VideoDetail`, `FormatSummary`) and
-//!   the [`FormatPreference`] selection logic
 
 mod client;
 mod models;

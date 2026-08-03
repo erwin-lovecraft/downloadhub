@@ -1,21 +1,6 @@
-//! Credential resolution shared by both binaries.
-//!
-//! Each secret is read in two steps, in order:
-//!
-//! 1. **Runtime environment** (`std::env::var`) — set by a `.env` file loaded
-//!    via `dotenvy` during local development, or by any real environment
-//!    variable. This keeps the existing dev workflow unchanged.
-//! 2. **Compile-time embedded value** (`option_env!`) — whatever the variable
-//!    was set to *when cargo compiled this crate* is baked into the binary as
-//!    a string literal. This is how a shipped release build carries
-//!    credentials with no `.env` file present: CI sets these variables (from
-//!    GitHub Actions secrets) at build time. See `docs/ARCHITECTURE.md`.
-//!
-//! Security note: embedding is not encryption. The values are recoverable
-//! from the binary (e.g. `strings`). For a desktop app this is an accepted
-//! tradeoff — the OAuth client id/secret for a Google "Desktop app" client
-//! are not confidential by design (RFC 8252), and the YouTube API key is
-//! protected by Google-side API/quota restrictions rather than by secrecy.
+//! Credential resolution: runtime env (`std::env::var`, incl. `.env`) first,
+//! then the compile-time embedded value (`option_env!`) for release builds.
+//! Embedding is not encryption — see `docs/ARCHITECTURE.md`.
 
 /// Resolves a secret: runtime environment first, then the value embedded at
 /// compile time. `None` if neither is set (the app degrades gracefully, as it

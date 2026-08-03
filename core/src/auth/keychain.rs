@@ -1,5 +1,4 @@
-//! Token persistence via the OS keychain (through `keyring`) — never to a
-//! plaintext file.
+//! Token persistence via the OS keychain (`keyring`).
 
 use super::tokens::Tokens;
 use super::AuthError;

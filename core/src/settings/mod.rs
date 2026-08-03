@@ -1,11 +1,5 @@
-//! Persisted app settings (default output folder, default quality).
-//!
-//! A small JSON blob at a path the caller provides — `core` stays
-//! platform-path-agnostic, same as `QueueStore` (see `AppState` in
-//! `src-tauri` for where that path actually comes from). A missing file
-//! (normal on first run) falls back to [`AppSettings::default`] rather
-//! than erroring; a present-but-corrupt file still errors, since silently
-//! discarding a user's saved settings would be surprising.
+//! Persisted app settings, as a JSON blob at a caller-provided path. A missing
+//! file falls back to defaults; a corrupt one errors.
 
 use std::path::Path;
 

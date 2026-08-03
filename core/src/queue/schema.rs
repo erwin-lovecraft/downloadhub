@@ -1,9 +1,4 @@
-//! Schema setup and migrations for the shared queue database.
-//!
-//! Databases created before agent actions became direct enqueues may still
-//! carry a `pending_agent_actions` table. It is deliberately left in place
-//! rather than dropped — nothing reads or writes it any more, and dropping
-//! a table on open is a destructive migration for no benefit.
+//! Schema setup and migrations for the shared queue database. Idempotent.
 
 use rusqlite::Connection;
 

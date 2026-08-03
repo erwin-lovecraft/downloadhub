@@ -2,9 +2,8 @@
 
 An AI-powered YouTube downloader desktop app: search YouTube, build a
 download queue (video + format + quality), and download videos. Also
-exposes an MCP server so external AI agents can propose
-playlists and queue downloads on the user's behalf, subject to explicit
-user approval.
+exposes an MCP server so external AI agents can search and fill the queue
+on the user's behalf — while never being able to start a download.
 
 Built with Tauri v2, React + TypeScript, and Rust. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the Cargo workspace
@@ -31,7 +30,7 @@ project's.
 Keyword search and playlist import call `search.list`/`videos.list`/
 `playlistItems.list` with a plain API key (no OAuth needed for this).
 
-1. In the same [Google Cloud Console project](https://console.cloud.google.com/apis/credentials),
+1. In a [Google Cloud Console project](https://console.cloud.google.com/apis/credentials),
    create an **API key** and enable the **YouTube Data API v3** for the
    project.
 2. Set `YOUTUBE_API_KEY` in your `.env` (see [`.env.example`](.env.example)).
@@ -117,13 +116,18 @@ backend. No config needed. A DASH (adaptive) format saves as
 ## AI agent access (MCP server)
 
 External AI agents (Claude Desktop, Claude Code, Gemini CLI, Codex CLI, …)
-can search YouTube and propose downloads through the bundled MCP server
-(`cargo build --release -p downloadhub-mcp-server`). Anything an agent
-requests that would change the queue or start a download waits as a
-pending request in the app's "AI agent requests" panel until you approve
-or reject it — nothing runs unattended. Agent access can be switched off
-entirely in the app's Settings dialog (it's on by default). Registration
-instructions per agent live in [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
+can search YouTube and fill the download queue through the bundled MCP
+server (`cargo build --release -p downloadhub-mcp-server`).
+
+**The server exposes no tool that can start a download.** Agents add
+entries to the queue; you review them in the queue sidebar — real titles,
+formats, and destinations — and change, remove, or download them. Clicking
+"Download all" is the only thing that ever spends bandwidth or writes media
+files. Agent access can also be switched off entirely in the app's Settings
+dialog (it's on by default).
+
+Registration instructions per agent live in
+[`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
 
 ## Recommended IDE Setup
 

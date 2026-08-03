@@ -1,17 +1,4 @@
 //! Google OAuth (installed-app/loopback flow) and token storage.
-//!
-//! [`LoginFlow::begin`] opens a listener on an OS-assigned loopback port and
-//! returns the URL the caller (the `app` crate) must open in the user's
-//! browser; [`LoginFlow::complete`] waits for the redirect, exchanges the
-//! authorization code, and returns [`Tokens`]. Tokens are persisted with
-//! [`store_tokens`]/[`load_tokens`] via the OS keychain (through `keyring`),
-//! never to a plaintext file.
-//!
-//! Layout, one responsibility per file:
-//!
-//! - [`flow`]: the OAuth wire logic (login flow, refresh, userinfo)
-//! - [`tokens`]: the token/user models and expiry logic
-//! - [`keychain`]: token persistence in the OS keychain
 
 mod flow;
 mod keychain;

@@ -1,87 +1,108 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
 
-## Current state
-
-Phase 1 is in progress. The Cargo workspace split (`core` / `src-tauri` / `mcp-server`) described below is done, as are the root `LICENSE` and README attribution. Step 2 (Google OAuth login) is implemented: `core::auth` does the installed-app/loopback flow via `oauth2` + token storage via `keyring`, `src-tauri/src/commands/auth.rs` exposes `auth_login`/`auth_logout`/`auth_status` commands, and the frontend (Tailwind + shadcn/ui + TanStack Query) shows signed-in state. Step 3 (keyword search) is implemented: `core::youtube` calls `search.list`/`videos.list` directly via `reqwest` (see `docs/ARCHITECTURE.md` for why, over the generated client), exposed as the `search_videos` command, with a search box + results list (thumbnail/title/channel/duration) in the UI. Step 4 (video format/quality lookup) is implemented: `core::stream` wraps `y7dl::Client` (pulled in as a pinned `git` dependency — not published to crates.io) behind a `StreamClient` reused for the app's lifetime via `AppState`, exposed as the `get_video_formats` command, with a "View formats" action per search result opening a panel listing itag/quality/resolution/size for every available stream. Step 5 (download queue) is implemented: `core::queue` persists entries to SQLite via `rusqlite` (`bundled` feature, no system SQLite dependency), exposed as `add_to_queue`/`list_queue` commands (names chosen to match the Phase 3 MCP tool list) backed by one `QueueStore` opened once in `AppState` against `<platform-data-dir>/downloadhub/queue.sqlite3`; the UI has an output-path text field and an "Add to queue" button per format row in the video detail panel, plus a `QueuePanel` listing queued entries with status. Step 6 (output folder picker) is implemented: `tauri-plugin-dialog` (Rust + `@tauri-apps/plugin-dialog` JS binding, `dialog:default` capability) backs a "Browse..." button next to the output-path field that opens a native folder picker; the field stays freely editable as text too. Step 7 (ranged download execution with progress events) is implemented: `core::download`'s `run_download` re-fetches the video (stream URLs expire), resolves the queued itag, derives `<title>[.video|.audio].<ext>` from the format's mime type, and streams it via `StreamClient::download` (`y7dl`'s own ranged `Range`-request chunking) through a throttled `AsyncWrite` progress wrapper, transitioning the entry's `QueueStore` status as it runs; `core` stays Tauri-agnostic by taking a plain progress callback. `src-tauri/src/commands/download.rs`'s `start_download` command spawns that on `tauri::async_runtime` and emits `download-progress` events, which the frontend (`useDownloadProgressListener`, a small Zustand store) turns into a live progress bar per queue entry behind a "Start" button. No concurrency limit or resume support yet — both are explicitly Phase 2. Step 8 (queue controls: start/cancel/remove/retry) is implemented: "start" landed with step 7; this step adds `cancel_download` (aborts the in-flight task via a `JoinHandle` registry in `AppState`, then marks the entry `Cancelled`) and `remove_from_queue` (aborts first if running, then deletes the row) commands, plus `QueueStore::delete_entry`. "Retry" isn't a separate command — `start_download` already accepted `Failed`/`Cancelled` entries, so the UI just relabels the same "Start" button to "Retry" for those statuses. Step 9 (basic usable UI) is implemented as a usability pass over the existing shadcn-default UI (no `docs/design/` Fluent spec exists yet, so per this doc's own fallback rule that's still the right call — see `docs/ARCHITECTURE.md` "App shell layout" for why the earlier, now-abandoned `feat/fluent-design-frontend-scaffold` branch wasn't used instead): `App.tsx` is now a fixed header (title + `AuthPanel`) over a two-column body (search left, a `QueuePanel` sidebar right) instead of one unbounded centered column, each column scrolling independently instead of growing the whole window; `VideoDetailPanel` is a `Dialog` instead of an inline block that pushed the queue down the page; the default window grew from 800×600 to 1100×750 (`minWidth`/`minHeight` 760×480). This closes out Phase 1 (MVP) as specified in the build order below. See [`README.md`](README.md) for the `.env` setup needed to exercise login and search (format lookup, the queue, the folder picker, downloading, and queue controls need no configuration).
-
-Phase 2 step 1 (playlist import) is implemented: `core::youtube::list_playlist_items` paginates `playlistItems.list` (capped at 200 items); `core::stream::FormatPreference` (`BestProgressive`/`BestAudioOnly`) is a two-option quality shortcut that `core::playlist::import_videos_to_queue` resolves per-video (one `get_video_formats`-equivalent call each, sequential) against, since a playlist's videos don't all offer the same itags — see `docs/ARCHITECTURE.md` ("Playlist import") for why this resolves per-video at import time rather than hardcoding a "universal" itag or deferring resolution to download time. `list_playlist_items`/`import_playlist_to_queue` commands back a two-step "load, then select videos + quality + folder, then bulk add" `PlaylistImportDialog`, opened via an "Import playlist" button next to Search; a video that fails to resolve is skipped and reported with a reason rather than aborting the whole import.
-
-Settings (default output folder, default quality) is implemented, reprioritized ahead of the rest of Phase 2 at the user's request: `core::settings` persists a small `AppSettings` JSON blob (reusing `FormatPreference` for `default_quality`) to `settings.json` alongside `queue.sqlite3` in the same app data directory (`AppState`'s directory resolution was factored out to be shared by both). `get_settings`/`save_settings` commands back a `SettingsDialog` (opened via a "Settings" button in the header); `VideoDetailPanel` and `PlaylistImportDialog` both seed their output-path (and, for the playlist dialog, quality) fields from these defaults each time they open. See `docs/ARCHITECTURE.md` ("Settings") for more.
-
-Download all (sequential, continue past failures) is implemented, reprioritized ahead of concurrent/resumable downloads at the user's explicit request: `core::download::run_all_queued` loops over `Queued` entries calling the existing `run_download` for each, tallying a `BatchDownloadOutcome { completed, failed }` — a per-entry failure needs no special handling since `run_download` already leaves it `Failed` with its error message, exactly like an individually-started download that failed; the loop just doesn't stop there. The `download_all` command (unlike `start_download`, it awaits the whole batch rather than spawning and returning immediately — see `docs/ARCHITECTURE.md`) is guarded by `AppState.batch_running`, which `start_download`/`cancel_download`/`remove_from_queue` all also check, since an individual command racing against the batch's direct (registry-bypassing) handling of the same entries has no safe outcome. A "Download all" button in `QueuePanel`'s header (disabled while a batch runs or nothing is queued) drives it, showing a "N completed, M failed" summary on completion; individual Start/Cancel/Remove buttons are disabled for the same duration. Concurrent downloads and resumable downloads are not yet implemented.
-
-Phase 3 (MCP) is implemented, taken ahead of the remaining Phase 2 items (concurrent/resumable downloads) at the user's request: the `mcp-server` binary (via `rmcp`, the official Rust MCP SDK, over stdio) exposes `search_videos`/`get_video_formats`/`list_queue` (read-only) plus `add_to_queue`/`add_mp3_to_queue`/`remove_from_queue` (queue-mutating, executed directly). `QueueStore` opens the database in WAL mode with a busy timeout since two processes share it; `core::paths` centralizes the shared data-dir resolution both binaries use. `AppSettings.mcp_enabled` (default true, re-read by the server on every call so toggling needs no restart) is the master switch, a checkbox in `SettingsDialog`.
-
-**The agent boundary is the download, not the queue** (this replaced the original per-action approval gate at the user's explicit request — see `docs/ARCHITECTURE.md`, "Where the agent boundary sits", for the full reasoning). Agents fill the queue unattended; the server exposes *no tool that can start a transfer*, so the user clicking "Download all" in the app is the only thing that ever spends bandwidth or writes media. This is enforced by the tool surface rather than by a runtime check, so there is no code path by which an agent starts a download. The whole approval apparatus — `core::agent`, the `pending_agent_actions` table, the `list_pending_agent_actions`/`approve_agent_action`/`reject_agent_action` commands, `AgentActionsPanel`, `useAgentActions`, `lib/agentActions.ts` — was deleted (old databases keep the now-unused table; `ensure_schema` doesn't drop it). `useQueue` polls every 3s so agent-added entries appear without user action, for the same cross-process reason the old agent-action poll existed.
-
-Both add tools take a **list** of videos (one call for a whole album, not one per track) and a `FormatPreference` rather than an itag, resolving each video's real formats server-side via `core::enqueue` — so agents needn't call `get_video_formats` first and can't queue an itag a video doesn't offer. `add_mp3_to_queue` is a dedicated tool (not just `quality: "mp3"`, which also works) because MP3 is the common request and a purpose-named tool gets selected more reliably. `output_path` falls back to the settings default, then the OS Downloads folder. See `docs/MCP_SETUP.md` for registration (Claude Desktop/Claude Code/Gemini CLI/Codex CLI, `YOUTUBE_API_KEY` via the client's `env` block).
-
-Queue editing followed from that: once agents fill the queue, it's a review surface rather than a write-once list. `set_queue_entry_format` repoints one entry at an exact itag picked from that video's format list (`ChangeFormatDialog`, opened by clicking a queue row's format line; audio-only rows also offer "Use as MP3"), while `set_queue_entries_quality` applies one `FormatPreference` to a checkbox multi-select ("Select all queued" + a quality dropdown + "Update" in `QueuePanel`) — a preference and not an itag, because a multi-select spans videos whose available itags differ. Both reset the entry to `Queued` with its error cleared (`QueueStore::set_format`), refuse to touch a `Downloading` entry, and are barred while a batch runs. `core::stream::FormatPreference` gained an `Mp3` variant (selecting itag 140 when offered, else the best audio-only stream, and setting `convert_to_mp3`), which also gives playlist import and the default-quality setting an MP3 option. `core::playlist` was renamed `core::enqueue` (`enqueue_videos` + `reformat_entries`) now that playlist import, the MCP add tools, and bulk re-format are all callers of the same per-video resolution loop.
-
-Credential embedding for release builds is implemented: `core::secrets` resolves each of the three credentials (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `YOUTUBE_API_KEY`) runtime-first then compile-time — `std::env::var(...)` (a local `.env` via `dotenvy`, unchanged for dev) falling back to `option_env!(...)`, so a shipped installer with no `.env` carries the values baked in. Both `src-tauri/src/state.rs` and `mcp-server/src/main.rs` now call these helpers instead of reading env vars directly. Because `option_env!` reads the *process environment at compile time* (not `.env`), the root `justfile` (`set dotenv-load`) exports the workspace `.env` into every recipe's environment, so a local `just release` embeds the `.env` values with no manual env-var step; real env vars always beat `.env`. The `build-windows` CI workflow installs `just` (`extractions/setup-just`) and runs the same `just release`, passing the three from GitHub Actions repository secrets of the same names as build-time env vars on that step. Embedding is not encryption (values are recoverable from the binary via `strings`), but it's an accepted desktop-app tradeoff: a Google "Desktop app" OAuth client id/secret aren't confidential by design (RFC 8252), and the YouTube key is protected by Google-side API/quota restrictions. See `README.md` ("Release builds (embedded credentials)").
-
-A UX pass (branch `feat/ux-preview-audio-openfolder`, PR #24) added: click-to-preview on search-result thumbnails (swaps the `<img>` for an inline `youtube-nocookie.com` embed iframe, one at a time, ✕ overlay to stop — no stream resolution involved); an "Open in files" button on `completed` queue entries (replaces the useless disabled "Start" there) that opens the entry's output folder via `tauri-plugin-opener` (`opener:allow-open-path` capability with a `**` scope, path comes from our own DB); and a one-click "Download MP3" button on each search result. That button queues **itag 140** (128 kbps AAC m4a — chosen over itag 139's ~48 kbps HE-AAC since the MP3 conversion is a lossy-to-lossy transcode and needs the best universal source) with a `convert_to_mp3` flag (new `queue_entries` column, idempotent ALTER-based migration; `serde(default)` on `NewQueueEntry` keeps old agent-action payloads readable), output folder from the settings default falling back to the OS Downloads dir. MP3 conversion is implemented in a fourth workspace crate, `transcode/` (`downloadhub-transcode`): a `tokio::process` wrapper (with `kill_on_drop`) around an external ffmpeg (`-codec:a libmp3lame -q:a 2`), resolved per download start by `AppState::resolve_transcoder` (settings change needs no restart) in priority order: the `ffmpeg_path` setting (an input + file picker in `SettingsDialog` — the way to enable MP3 on macOS), then a bundled sidecar next to the app executable (Windows only: a static GPL build vendored in the repo at `tools/ffmpeg-windows-x86_64.exe` — a deliberately committed binary at the user's direction, after an `ffmpeg-static` npm iteration was dropped since no JS code used it — staged by `just sidecar` and declared in `tauri.windows.conf.json`'s platform-merged `externalBin`; a previously-vendored macOS binary was removed because unsigned binaries get blocked by Gatekeeper), then PATH (the sidecar/PATH lookup is `downloadhub_transcode::locate_ffmpeg`). The conversion runs *inside* `run_download` — after the m4a lands, a `Transcoding`-phase progress event fires (UI shows "converting to mp3..."), ffmpeg writes `<title>.mp3`, and the m4a is deleted only on success (kept on failure alongside the `Failed` status carrying ffmpeg's stderr) — so "Download all" finishes each entry (download → transcode → delete) before starting the next; prerequisites (audio-only itag, ffmpeg present) are validated before any bandwidth is spent. `run_download`/`run_all_queued` now take a `DownloadContext` struct (stream client + store + optional transcoder) instead of growing positional parameters. MCP-proposed entries never set the flag yet. See `docs/ARCHITECTURE.md` ("MP3 download").
-
-A layering/readability refactor (no behavior change; all commands, MCP tools, events, and the SQLite schema are untouched) restructured the Rust side at the user's direction: (1) the `core` → `transcode` dependency was inverted — `core::download` now defines an object-safe `Transcode` trait (`DownloadContext.transcoder: Option<&dyn Transcode>`, errors as a boxed `BoxError`), the `transcode` crate depends on `core` and implements it for `Transcoder`, `core` no longer depends on (or re-exports) `transcode`, and `src-tauri` depends on both directly (so `mcp-server` no longer links ffmpeg code it never uses); `locate_ffmpeg` (exe-adjacent sidecar, then PATH) also moved from `src-tauri/state.rs` into `transcode`. (2) Every multi-responsibility `mod.rs` in `core` was split one-responsibility-per-file, with `mod.rs` reduced to docs + re-exports so all public paths (`downloadhub_core::queue::QueueStore` etc.) are unchanged: `queue/` → `entry`/`schema`/`repository`/`store`, `agent/` → `action`/`repository`/`store`, `download/` → `runner`/`progress`/`output`/`transcode`, `auth/` → `flow`/`tokens`/`keychain`, `youtube/` → `client`/`models`/`response` (+ existing `duration`), `stream/` → `client`/`models`; `settings`/`playlist`/`paths`/`secrets` were left as single files (already single-purpose). (3) All SQL now lives in per-table repository structs (`QueueRepository`, `AgentActionRepository`): synchronous, constructed per operation on the already-locked connection; the `QueueStore` facade owns the connection and wraps every call in `spawn_blocking` via a shared `with_repository` helper, so locking/async bridging and SQL are never in the same file.
+Each crate has its own `CLAUDE.md` with the detail for that layer:
+[`core/`](core/CLAUDE.md), [`src-tauri/`](src-tauri/CLAUDE.md),
+[`mcp-server/`](mcp-server/CLAUDE.md), [`transcode/`](transcode/CLAUDE.md).
+Design decisions and their rationale live in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## What this project is
 
-An AI-powered YouTube downloader desktop app: Google OAuth login, keyword search via the YouTube Data API, a download queue (video + format + quality), and chunked downloads via `y7dl`. Phase 3 adds an MCP server so external AI agents can propose playlists/queue downloads subject to explicit user approval in the running app.
+An AI-powered YouTube downloader desktop app (Tauri + React): keyword search via
+the YouTube Data API, playlist import, a SQLite-backed download queue, chunked
+downloads via `y7dl`, and optional MP3 conversion via ffmpeg. A separate MCP
+server binary lets external AI agents search and fill the queue — but never
+start a download.
 
-**License constraint:** the download engine depends on [`y7dl`](https://github.com/erwin-lovecraft/y7dl) (GPL-3.0-or-later). The whole project is GPL-licensed as a result — do not add proprietary/closed dependencies to any crate that links against `y7dl`. A root `LICENSE` (GPL-3.0-or-later) and attribution to `y7dl` and its upstream (`kkdai/youtube`) in the README are required.
+`core::auth` implements a Google OAuth installed-app/loopback flow with keychain
+token storage, but **nothing currently calls it**: there are no `auth_*` Tauri
+commands and no sign-in UI. Search runs on the API key alone. Treat the module
+as dormant, not as a shipped feature.
 
-## Target architecture (build toward this)
+## Workspace layout
 
-Cargo **workspace**, not a single Tauri crate:
+Cargo workspace with four members plus a Vite/React frontend in top-level
+`src/`:
 
-- `core/` — pure business logic, no Tauri dependency: YouTube Data API client, `y7dl` wrapper, queue manager, download orchestrator, SQLite persistence.
-- `app/` — the Tauri application: thin command handlers calling into `core`, event emission to the frontend for progress updates.
-- `mcp-server/` — separate binary (Phase 3), also depends on `core`, exposes MCP tools over stdio/socket. Must reuse `app`'s queue manager (via shared local IPC or shared DB, not duplicated logic) — document the chosen approach in `docs/ARCHITECTURE.md`.
+| Path | Package | Role |
+| --- | --- | --- |
+| `core/` | `downloadhub-core` | Business logic. No `tauri` dependency. |
+| `src-tauri/` | `downloadhub` | Tauri app: thin commands + event emission. |
+| `transcode/` | `downloadhub-transcode` | ffmpeg process wrapper (MP3). |
+| `mcp-server/` | `downloadhub-mcp-server` | MCP tools over stdio. |
 
-Frontend lives in top-level `src/` (current Vite/React layout).
+Dependency arrows all point at `core`; `core` depends on none of the others.
+Both binaries share one SQLite database rather than talking over IPC.
 
-Key Rust dependency choices (see `docs/ARCHITECTURE.md` once written for the actual decision made on the YouTube API client — official generated crate vs. direct `reqwest`+`serde`):
-- `y7dl` for stream resolution and chunked download
-- `oauth2` crate for Google OAuth (installed-app/loopback flow); tokens stored via `keyring` (OS keychain) — never plaintext
-- `tokio` for async orchestration
-- `sqlx` or `rusqlite` + SQLite for queue/history persistence
-- No `ffmpeg`/muxing dependency yet — DASH adaptive downloads must save video-only and audio-only streams as separate, clearly labeled files (e.g. `title.video.webm` + `title.audio.webm`). Leave an explicit extension seam (e.g. a `Muxer` trait) in `core` for a future transcode crate rather than muxing inline.
+## Hard constraints
 
-UI reference: a Fluent-style design lives at a Claude Design link the user will export into `docs/design/` (screenshots or similar) — once present, treat it as the source of truth for layout/spacing/styling rather than improvising a different visual direction.
-
-## Build order
-
-Work proceeds in three phases and should **not be skipped ahead**; commit incrementally per numbered step with clear messages rather than delivering a phase in one giant commit:
-
-1. **Phase 1 (MVP):** workspace scaffold → Google OAuth login → keyword search (`search.list`) → video format/quality lookup via `y7dl` → download queue (SQLite-backed) → output folder picker (Tauri `dialog` plugin) → ranged download execution with progress events → queue controls (start/cancel/remove/retry) → basic usable UI.
-2. **Phase 2 (enhanced downloading):** playlist import (`playlistItems.list`) → settings screen (output folder, default quality — reprioritized ahead of the rest of this phase at the user's request; concurrency/theme settings deferred to whenever those features land) → download-all-in-queue, sequentially one at a time, continuing past a failed entry (marked `Failed` with its error message) to the next rather than aborting the batch → concurrent downloads (configurable limit, default ~3) → resumable downloads via range requests.
-3. **Phase 3 (MCP):** `mcp-server` binary exposing `search_videos`, `get_video_formats`, `list_queue`, `add_to_queue`, `add_mp3_to_queue`, `remove_from_queue`. **The MCP server must never be able to start a download** — it exposes no tool that can, so the only way bytes move is the user clicking "Download all" in the running desktop app. Queue mutations themselves execute immediately (the user reviews the queue, not a prompt per action — see `docs/ARCHITECTURE.md`, "Where the agent boundary sits", for why this replaced the original per-action approval gate). Document external-agent registration (Claude Desktop MCP config, Gemini/Codex equivalents) in `docs/MCP_SETUP.md`.
+- **License:** the download engine depends on
+  [`y7dl`](https://github.com/erwin-lovecraft/y7dl) (GPL-3.0-or-later), so the
+  whole project is GPL-3.0-or-later. Do not add proprietary or closed
+  dependencies to any crate linking against `y7dl`. Attribution to `y7dl` and
+  its upstream (`kkdai/youtube`) in the README is required.
+- **The MCP server must never be able to start a download.** This is enforced by
+  the tool surface — no tool exists that starts a transfer — not by a runtime
+  check. Do not add one. See `docs/ARCHITECTURE.md`, "Where the agent boundary
+  sits".
+- **Respect YouTube's terms of service** as noted in `y7dl`'s own README. Don't
+  add features that circumvent rate limits or work around API restrictions
+  beyond what `y7dl` already does.
 
 ## Commands
 
-Task runner (`just`, workspace root — the preferred entry points; loads `.env` into the environment of every recipe via `set dotenv-load`):
-- `just dev` — full Tauri app in dev mode (wraps `pnpm tauri dev`)
-- `just release` — production installer: builds the `mcp-server` sidecar into `src-tauri/binaries/`, then `pnpm tauri build`, with `.env` credentials embedded at compile time
-- `just sidecar` — just the sidecar build/copy step
+Task runner (`just`, at the workspace root — the preferred entry points; loads
+`.env` into every recipe's environment via `set dotenv-load`):
+
+- `just dev` — full Tauri app in dev mode
+- `just release` — production installer: builds the `mcp-server` sidecar into
+  `src-tauri/binaries/`, then `pnpm tauri build`, with `.env` credentials
+  embedded at compile time
+- `just sidecar` — the sidecar build/copy step alone
 
 Frontend (pnpm, workspace root):
+
 - `pnpm dev` — Vite dev server only
 - `pnpm build` — `tsc` typecheck + Vite production build
-- `pnpm tauri dev` — full Tauri app in dev mode (spawns Vite via `beforeDevCommand`)
-- `pnpm tauri build` — production desktop bundle (does *not* stage the sidecar or load `.env` — use `just release` for shippable builds)
+- `pnpm tauri dev` / `pnpm tauri build` — note that `tauri build` does *not*
+  stage the sidecar or load `.env`; use `just release` for shippable builds
 
-Rust (run from `src-tauri/` until the workspace split lands, then from repo root against the workspace):
+Rust (from the repo root, against the workspace):
+
 - `cargo build`
-- `cargo clippy` / `cargo fmt` — must be kept clean; no `unwrap()`/`panic!` on I/O or network paths, use the `Result`-based error pattern `y7dl` itself uses
-- `cargo test` — once `core/` exists, prioritize unit tests for queue state transitions there; add at least a smoke test for Tauri commands in `app/`
-
-No test runner is configured on the frontend yet.
+- `cargo clippy` / `cargo fmt` — must stay clean
+- `cargo test`
 
 ## Conventions
 
-- TypeScript strict mode is on (`tsconfig.json`); no `any` without a justifying comment.
-- Frontend stack per the spec (not yet installed): TanStack Query, Zustand, Tailwind CSS, shadcn/ui.
-- Respect YouTube's terms-of-service risk noted in `y7dl`'s own README — don't add features that circumvent rate limits or work around API restrictions beyond what `y7dl` already does.
-- Dev server is fixed to port 1420 (strict) with HMR on 1421; Vite is configured to ignore `src-tauri/` for watching.
+- No `unwrap()`/`panic!` on I/O or network paths; use the `Result`-based error
+  pattern `y7dl` itself uses.
+- Prioritize unit tests for queue state transitions in `core/`; keep at least a
+  smoke test for Tauri commands in `src-tauri/`.
+- TypeScript strict mode is on; no `any` without a justifying comment.
+- Frontend stack: TanStack Query, Zustand, Tailwind CSS, shadcn/ui. No test
+  runner is configured on the frontend yet.
+- Dev server is fixed to port 1420 (strict) with HMR on 1421; Vite ignores
+  `src-tauri/` for watching.
+- Commit incrementally with clear messages rather than one giant commit per
+  feature.
+- Keep comments and docs describing *what the code is and why*, not what changed
+  or in what order things were built — that's what git history is for.
+
+## Open work
+
+- Concurrent downloads (configurable limit, default ~3). Today each
+  `start_download` spawns an unbounded task; "Download all" is strictly
+  sequential.
+- Resumable downloads via range requests. An interrupted download restarts from
+  scratch.
+- A `docs/design/` export of the Fluent design reference. Until it exists, use
+  clean shadcn/ui defaults rather than improvising a different visual direction.
+
+## Setup
+
+See [`README.md`](README.md) for the `.env` setup needed to exercise login and
+search, and [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md) for registering the MCP
+server with Claude Desktop / Claude Code / Gemini CLI / Codex CLI.

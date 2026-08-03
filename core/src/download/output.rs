@@ -1,10 +1,4 @@
-//! Output file naming: maps an entry's title and format to the destination
-//! path on disk.
-//!
-//! `y7dl` doesn't mux DASH streams, so a video-only or audio-only format is
-//! saved to its own clearly-labeled file (`<title>.video.<ext>` /
-//! `<title>.audio.<ext>`); a progressive format (both tracks in one stream)
-//! is saved as `<title>.<ext>` — see `docs/ARCHITECTURE.md`.
+//! Output file naming: maps an entry's title and format to a destination path.
 
 use std::path::PathBuf;
 

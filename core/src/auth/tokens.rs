@@ -1,4 +1,4 @@
-//! The token and user-info models, including expiry logic.
+//! Token and user-info models, including expiry logic.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

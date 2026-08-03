@@ -1,6 +1,4 @@
-//! Thin Tauri command handler for bulk playlist import. All resolution/
-//! queueing logic lives in `downloadhub_core::enqueue`, shared with the MCP
-//! server's add tools; this module just wires it up.
+//! Tauri command for bulk playlist import (logic in `downloadhub_core::enqueue`).
 
 use crate::state::AppState;
 use downloadhub_core::enqueue::{self, EnqueueOutcome};

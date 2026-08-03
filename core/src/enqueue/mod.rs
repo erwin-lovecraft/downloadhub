@@ -1,18 +1,6 @@
-//! Bulk queue operations driven by a [`FormatPreference`] rather than an
-//! exact itag.
-//!
-//! The available itags vary video to video, so anything acting on more than
-//! one video at a time — playlist import, an AI agent enqueueing search
-//! results over MCP, re-formatting a multi-select in the queue UI — can't
-//! name a single itag up front. It states a *preference* instead, and each
-//! video's own format list is resolved against it individually
-//! (`core::stream`), exactly like the single-video "view formats" flow does
-//! one at a time.
-//!
-//! A video that fails to resolve (deleted, private, region-locked, no
-//! format matching the preference) is skipped and reported rather than
-//! aborting the whole operation — one bad video in a fifty-video playlist
-//! shouldn't cost the user the other forty-nine.
+//! Bulk queue operations driven by a `FormatPreference` rather than an exact
+//! itag, resolving each video's own format list individually. A video that
+//! fails to resolve is skipped and reported rather than aborting the batch.
 
 use crate::queue::{NewQueueEntry, QueueEntry, QueueError, QueueStore};
 use crate::stream::{FormatPreference, StreamClient};

@@ -1,5 +1,4 @@
-//! Progress reporting: the types callers receive and the throttled
-//! `AsyncWrite` wrapper that produces them during a download.
+//! Progress types and the throttled `AsyncWrite` wrapper that produces them.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};

@@ -1,21 +1,6 @@
-//! MCP server binary (Phase 3): exposes downloadhub to external AI agents
-//! over stdio.
-//!
-//! **This server can search and it can queue, but it cannot download.**
-//! There is deliberately no tool here that starts a transfer: the queue is
-//! a proposal the user reviews in the desktop app, where "Download all" is
-//! the single human action that spends bandwidth and writes media files.
-//! An agent filling the queue is cheap and reversible (entries are visible,
-//! re-formattable, and removable before anything runs); an agent starting
-//! downloads unattended is neither. That boundary — not a per-action
-//! approval prompt — is what keeps agent access safe, and it is enforced by
-//! the tool surface rather than by a check that could be bypassed.
-//!
-//! Queue tools take *lists* of videos rather than one per call: an agent
-//! adding a ten-track album should spend one round-trip, not ten.
-//!
-//! Registration with Claude Desktop / Gemini CLI / Codex is documented in
-//! `docs/MCP_SETUP.md`.
+//! MCP server binary: exposes downloadhub's search and queue tools over stdio.
+//! It deliberately exposes no tool that can start a transfer — see
+//! `mcp-server/CLAUDE.md` and `docs/MCP_SETUP.md`.
 
 use std::path::PathBuf;
 use std::sync::Arc;

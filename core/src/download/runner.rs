@@ -1,12 +1,5 @@
-//! The download orchestrator: executes one queue entry's download through
-//! `StreamClient`, updating its status in `QueueStore` and reporting
-//! progress along the way.
-//!
-//! An entry flagged `convert_to_mp3` (audio-only formats only) gets one
-//! extra step after its download completes: the m4a is transcoded to
-//! `<title>.mp3` through the [`Transcode`] seam and the m4a is deleted.
-//! The transcode is part of the same `run_download` call, so a batch
-//! naturally finishes each entry's conversion before starting the next.
+//! Download orchestrator: runs one queue entry (plus optional MP3 transcode) to
+//! completion, updating its `QueueStore` status along the way.
 
 use std::time::Instant;
 

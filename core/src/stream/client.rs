@@ -1,4 +1,4 @@
-//! [`StreamClient`], the thin wrapper over `y7dl::Client`.
+//! `StreamClient`, the thin wrapper over `y7dl::Client`.
 
 use super::models::{select_format, FormatPreference, FormatSummary, ResolvedFormat, VideoDetail};
 use super::StreamError;

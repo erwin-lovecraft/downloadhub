@@ -1,6 +1,4 @@
-//! The raw wire shapes of the YouTube Data API responses, and their
-//! conversion into the public [`VideoSummary`] model. Nothing outside this
-//! file needs to know what the API's JSON looks like.
+//! Raw YouTube API wire shapes and their conversion into the public models.
 
 use serde::Deserialize;
 

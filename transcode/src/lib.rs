@@ -1,12 +1,6 @@
-//! Audio transcoding via an external `ffmpeg` binary.
-//!
-//! ffmpeg is not linked as a library: the desktop app bundles a static
-//! ffmpeg build as a Tauri sidecar (staged by `just sidecar`, declared in
-//! `tauri.conf.json`'s `externalBin`) and passes its path in here. That
-//! keeps this crate a thin process wrapper with no build-time ffmpeg
-//! dependency, lets dev environments fall back to an ffmpeg found on PATH,
-//! and keeps the GPL boundary simple (ffmpeg GPL builds match this
-//! project's GPL-3.0-or-later license).
+//! Audio transcoding via an external `ffmpeg` process (not linked as a library).
+//! The path comes from the caller: a settings override, the bundled sidecar, or
+//! PATH.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

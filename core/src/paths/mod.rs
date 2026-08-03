@@ -1,7 +1,5 @@
-//! Shared filesystem locations. Lives in `core` (rather than `src-tauri`,
-//! where it originated) because the desktop app and the `mcp-server` binary
-//! must resolve the *same* app data directory to share the queue database
-//! and settings file — see `docs/ARCHITECTURE.md`.
+//! Shared app data directory resolution — both binaries must agree on it to
+//! share the queue database and settings file.
 
 use std::path::{Path, PathBuf};
 

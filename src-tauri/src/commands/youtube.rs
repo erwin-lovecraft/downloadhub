@@ -1,6 +1,4 @@
-//! Thin Tauri command handlers for keyword search and playlist listing.
-//! All YouTube Data API logic lives in `downloadhub_core::youtube`; this
-//! module just wires it up.
+//! Tauri commands for keyword search and playlist listing.
 
 use crate::state::AppState;
 use downloadhub_core::youtube::{VideoSummary, YoutubeClient};

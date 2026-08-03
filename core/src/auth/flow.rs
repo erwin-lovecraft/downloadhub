@@ -1,5 +1,4 @@
-//! The OAuth wire logic: the installed-app/loopback login flow, token
-//! refresh, and the userinfo fetch.
+//! OAuth wire logic: the loopback login flow, token refresh, and userinfo fetch.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

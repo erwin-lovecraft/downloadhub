@@ -1,8 +1,5 @@
-//! Thin Tauri command handlers that run downloads in the background and
-//! stream progress to the frontend as `download-progress` events. All
-//! download logic lives in `downloadhub_core::download`; this module just
-//! spawns/drives it and forwards progress through Tauri's event system
-//! (which `core` has no dependency on).
+//! Tauri commands that run downloads in the background and forward progress to
+//! the frontend as `download-progress` events.
 
 use crate::state::AppState;
 use downloadhub_core::download::{

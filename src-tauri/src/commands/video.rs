@@ -1,5 +1,4 @@
-//! Thin Tauri command handler for video format/quality lookup. All `y7dl`
-//! logic lives in `downloadhub_core::stream`; this module just wires it up.
+//! Tauri command for video format/quality lookup.
 
 use crate::state::AppState;
 use downloadhub_core::stream::VideoDetail;

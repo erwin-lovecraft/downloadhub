@@ -1,8 +1,5 @@
-//! The transcoding seam: `core` decides *when* an MP3 conversion happens
-//! but not *how*. The `downloadhub-transcode` crate implements this trait
-//! with an external ffmpeg process; anything else (a test double, a future
-//! muxer backend) can too, keeping `core` free of any dependency on a
-//! concrete transcoder.
+//! The `Transcode` trait: the seam a concrete transcoder plugs into, keeping
+//! `core` free of any dependency on one.
 
 use std::future::Future;
 use std::path::Path;

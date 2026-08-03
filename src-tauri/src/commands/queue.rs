@@ -1,9 +1,5 @@
-//! Thin Tauri command handlers for the download queue. All persistence
-//! logic lives in `downloadhub_core::queue`; this module just wires it up.
-//!
-//! Command names (`add_to_queue`, `list_queue`) match the MCP tool names
-//! planned for Phase 3 (see `CLAUDE.md`), so the MCP server can expose the
-//! same underlying `downloadhub_core::queue` operations without renaming.
+//! Tauri commands for the download queue (logic in `downloadhub_core::queue`).
+//! Names match the MCP tool names so both expose the same operations.
 
 use crate::state::AppState;
 use downloadhub_core::enqueue::{self, ReformatOutcome};

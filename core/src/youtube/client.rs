@@ -1,5 +1,4 @@
-//! [`YoutubeClient`]: the HTTP orchestration against the YouTube Data API
-//! (endpoints, pagination, batching). Response shapes live in `response`.
+//! `YoutubeClient`: HTTP orchestration against the YouTube Data API.
 
 use std::collections::HashMap;
 
