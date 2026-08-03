@@ -15,6 +15,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::queue::add_to_queue,
             commands::queue::list_queue,
             commands::queue::remove_from_queue,
+            commands::queue::clear_queue,
             commands::queue::set_queue_entry_format,
             commands::queue::set_queue_entries_quality,
             commands::download::start_download,

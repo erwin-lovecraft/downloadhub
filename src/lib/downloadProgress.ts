@@ -14,6 +14,7 @@ interface DownloadProgressState {
   progress: Record<number, DownloadProgressEvent>;
   setProgress: (event: DownloadProgressEvent) => void;
   clearProgress: (queueId: number) => void;
+  clearAllProgress: () => void;
 }
 
 export const useDownloadProgressStore = create<DownloadProgressState>((set) => ({
@@ -25,4 +26,5 @@ export const useDownloadProgressStore = create<DownloadProgressState>((set) => (
       const { [queueId]: _removed, ...rest } = state.progress;
       return { progress: rest };
     }),
+  clearAllProgress: () => set({ progress: {} }),
 }));
