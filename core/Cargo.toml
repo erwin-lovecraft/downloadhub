@@ -3,13 +3,14 @@ name = "downloadhub-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Pure business logic for downloadhub: YouTube Data API client, y7dl wrapper, queue manager, download orchestrator, and persistence. No Tauri dependency."
+description = "Pure business logic for downloadhub: YouTube Data API client, yt-dlp wrapper, queue manager, download orchestrator, and persistence. No Tauri dependency."
 
 [lib]
 name = "downloadhub_core"
 
 [dependencies]
 dirs = "6.0.0"
+downloadhub-ytdlp = { path = "../ytdlp" }
 keyring = { version = "4.1.4", features = ["v1"] }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
 reqwest = { version = "0.13.4", features = ["json", "query"] }
@@ -20,4 +21,3 @@ thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs"] }
 tokio-util = "0.7.18"
 url = "2.5.8"
-y7dl = "0.1.1"

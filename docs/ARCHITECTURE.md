@@ -5,10 +5,10 @@ this way" rather than "how it got here".
 
 ## Cargo workspace layout
 
-Four members:
+Five members:
 
 - **`core/`** (package `downloadhub-core`, lib `downloadhub_core`) — business
-  logic with no `tauri` dependency: YouTube Data API client, `y7dl` wrapper,
+  logic with no `tauri` dependency: YouTube Data API client, `yt-dlp` wrapper,
   queue manager, download orchestrator, SQLite persistence. Named
   `downloadhub-core` rather than `core` because `core` is always in Rust's
   extern prelude and reusing the name causes ambiguous-name resolution errors;
@@ -22,12 +22,21 @@ Four members:
   stays isolated and independently testable. It depends on `core` and
   implements `core`'s `download::Transcode` trait; `core` has no dependency on
   it.
+- **`ytdlp/`** (package `downloadhub-ytdlp`) — video metadata lookup and
+  downloads via an external `yt-dlp` process. Unlike `transcode`, **`core`
+  depends on this crate directly** (the position `y7dl` used to hold):
+  metadata/format lookup isn't optional the way MP3 transcoding is, since
+  `mcp-server` needs video lookups but never needs a transcoder.
 - **`mcp-server/`** (package `downloadhub-mcp-server`, binary `mcp-server`) —
   MCP tools over stdio. Depends on `core` so it reuses the same queue manager
   and persistence as the desktop app. See [`MCP_SETUP.md`](MCP_SETUP.md).
 
-Dependency arrows all point at `core`: it defines the contracts, satellite
-crates implement them.
+Dependency arrows all point at `core`, in one of two shapes: `core` depends
+directly on `ytdlp` (a plain support crate, no trait involved — the same shape
+`y7dl` used to have), while `transcode` depends on `core` and implements a
+trait `core` defines. The difference tracks whether the capability is always
+needed (`core` calling out to `ytdlp`) or genuinely optional and pluggable
+(a `&dyn Transcode` `core::download` may or may not be given).
 
 The root `Cargo.toml` is the workspace manifest and defines shared
 `[workspace.package]` values each member inherits. Cargo builds the whole
@@ -73,18 +82,53 @@ well-specified format.
 
 ## Video format/quality lookup
 
-`core::stream` wraps `y7dl::Client` as `StreamClient`. `y7dl` isn't published
-to crates.io, so it's a `git` dependency pinned to a commit (`rev`) rather than
-tracking a branch, keeping builds reproducible.
+`core::stream` wraps `downloadhub_ytdlp::YtDlp` as `StreamClient`, which
+originally wrapped `y7dl::Client` — a pure-Rust InnerTube client. That broke
+when YouTube changed its extraction internals, with no fix possible short of
+tracking YouTube's changes in our own Rust code the way `y7dl` did. `yt-dlp`
+(an external binary, not a Rust dependency) is maintained upstream
+specifically to track that churn, so `core::stream` now shells out to it via
+`downloadhub-ytdlp` (`ytdlp/`) instead — the same "external process, not a
+linked library" posture `transcode` already uses for ffmpeg.
 
-`y7dl::Video`/`Format` derive `Deserialize` but not `Serialize`, so they can't
-cross the Tauri IPC boundary directly. `core::stream` maps them into
-`VideoDetail`/`FormatSummary` DTOs that do — the same shape-translation
-`core::youtube` does for `VideoSummary`.
+`downloadhub_ytdlp::Video`/`Format` are plain data (no `Serialize`, since
+nothing requires it), and wouldn't be the right shape to expose over Tauri IPC
+regardless — `core::stream` maps them into `VideoDetail`/`FormatSummary` DTOs
+that derive `Serialize`, the same shape-translation `core::youtube` does for
+`VideoSummary`.
 
-One `StreamClient` is created once in `AppState` and reused for the app's
-lifetime: `y7dl::Client` caches parsed player JS and pools HTTP connections,
-both wasted if rebuilt per lookup.
+Because yt-dlp is a subprocess spawned per call rather than a client holding
+pooled connections, `StreamClient` is now a stateless marker struct — kept
+only so `AppState.stream_client` and existing call sites didn't need to
+change shape. Every method takes a `YtDlpConfig` (binary path override +
+optional cookies file path) resolved fresh by the caller from settings on
+every call — see `core::stream::resolve_ytdlp_config` — so a changed yt-dlp
+path or updated cookies apply to the very next search or download, no restart
+needed (the same freshness rule `ffmpeg_path` and `mcp_enabled` already
+follow).
+
+`YtDlp::fetch_video` runs `yt-dlp -J --skip-download` and parses the JSON
+into `Video`/`Format`; formats whose `format_id` isn't a plain number
+(storyboards, `sb0`/`sb1`) are dropped during that conversion, since every
+real YouTube stream format's id is numeric — the same number the old itag
+was, so `QueueEntry::itag: u32` and the rest of the itag-based plumbing needed
+no changes.
+
+### Cookies (bot-check workaround)
+
+YouTube sometimes requires sign-in verification ("confirm you're not a bot")
+before serving formats or streams at all — yt-dlp surfaces this as a specific
+stderr message, which `downloadhub_ytdlp::classify_error` recognizes and
+turns into a clear `BotCheckRequired` error rather than a generic failure.
+The workaround is cookies from a signed-in browser session: the Settings
+dialog has a "yt-dlp cookies" field where the user pastes the contents of a
+Netscape-format `cookies.txt` export (e.g. via a "Get cookies.txt" browser
+extension). `core::settings::AppSettings.ytdlp_cookies` stores that text
+verbatim; `resolve_ytdlp_config` writes it to
+`<app-data-dir>/cookies.txt` and passes `--cookies <path>` to yt-dlp whenever
+it's non-empty. Stored as pasted text rather than a file path so the app
+needs no separate "browse to your cookies file" step — the dialog *is* the
+cookie store.
 
 ## Download queue persistence
 
@@ -108,9 +152,9 @@ app failing to start, mirroring how missing credentials degrade instead of
 panicking.
 
 `queue_entries.output_path` holds a destination *folder*, not a full file path:
-`y7dl` doesn't mux, so a DASH download can produce two files for one entry. The
-download orchestrator derives filenames from the video title and format inside
-that folder.
+yt-dlp isn't asked to mux (see "Muxing extension point" below), so a DASH
+download can produce two files for one entry. The download orchestrator
+derives filenames from the video title and format inside that folder.
 
 Databases created by older versions may still carry a `pending_agent_actions`
 table. Nothing reads or writes it; `ensure_schema` deliberately doesn't drop
@@ -124,24 +168,30 @@ picker (`open({ directory: true })`) with the plugin's own permission
 as `tauri-plugin-opener`. The field stays freely editable as text, so a folder
 can be pasted or typed.
 
-## Ranged download execution and progress events
+## Download execution and progress events
 
 `core::download::run_download` is the orchestrator: given a queue entry id it
-re-fetches the video via `StreamClient::fetch_video` (InnerTube stream URLs are
-time-limited, so a stored URL can't be reused), resolves the requested itag,
-derives the destination filename, and streams the format through
-`StreamClient::download` — which is `y7dl` itself doing the ranged chunk
-requests; `core::download` doesn't reimplement chunking. It transitions the
-entry's status in `QueueStore` (`Queued`/`Failed` → `Downloading` →
-`Completed`/`Failed`) as it runs.
+re-fetches the video via `StreamClient::fetch_video` (yt-dlp's stream
+resolution is itself time-limited, so a stored format list can't be reused),
+resolves the requested itag, derives the destination filename, and downloads
+the format through `StreamClient::download` — which spawns `yt-dlp -f <itag>
+-o <dest>` and lets it do the actual transfer (chunking, retries, and TCP
+resume of a `.part` file if the process is killed mid-download are all
+yt-dlp's own behavior; `core::download` doesn't reimplement any of it, the
+same "don't reimplement what the external process already does" posture as
+handing ffmpeg a whole file to transcode). It transitions the entry's status
+in `QueueStore` (`Queued`/`Failed` → `Downloading` → `Completed`/`Failed`) as
+it runs.
 
 Progress is a plain `FnMut(DownloadProgress)` callback, not a Tauri event —
-`core` stays Tauri-agnostic. The callback is invoked from `ProgressWriter`, an
-`AsyncWrite` wrapper between `y7dl`'s chunked writes and the destination file;
-`y7dl` writes each network chunk via `write_all`, so wrapping the destination
-gives fine-grained progress without touching `y7dl`. The wrapper throttles to
-~5 callbacks/sec (time-based, not chunk-count-based) so any sink gets a bounded
-rate regardless of chunk size.
+`core` stays Tauri-agnostic. yt-dlp reports progress as its own stdout lines
+(via `--progress-template`, parsed by `downloadhub_ytdlp::download`), which
+`StreamClient::download` forwards to the caller unthrottled — throttling is a
+UI concern, not something yt-dlp or the process wrapper should own.
+`core::download::runner::download_entry` wraps the callback in a `Throttle`
+(time-based, ~5 callbacks/sec, not line-count-based) before it ever reaches
+`on_progress`, so any sink gets a bounded rate regardless of how chatty
+yt-dlp's output is.
 
 `src-tauri/src/commands/download.rs` holds the Tauri-specific plumbing:
 `start_download` spawns `run_download` on `tauri::async_runtime` and returns
@@ -154,8 +204,12 @@ small Zustand store. On a terminal event the listener invalidates the
 — resyncs from SQLite.
 
 Concurrency is unbounded: each `start_download` spawns its own task with no
-shared limiter. There is no resume support; an interrupted download restarts
-from scratch. Both are open work.
+shared limiter — open work. Resume is no longer a gap the way it was under
+`y7dl`: `run_download`/`cancel_download` kill the yt-dlp child via
+`kill_on_drop` rather than aborting mid-write, and yt-dlp resumes an
+interrupted `.part` file on its own (`-c`/`--continue`, on by default) the
+next time the same entry is started — a side effect of switching to yt-dlp,
+not a feature `core` implements or can configure.
 
 ## Queue controls (cancel/remove/retry)
 
@@ -264,6 +318,11 @@ settings-only quality type. `VideoDetailPanel` and `PlaylistImportDialog` seed
 their form state from `get_settings` each time they open — not on every render,
 so it doesn't clobber what the user has already typed while a dialog stays
 open. Pre-filling, not forcing: both flows still allow a per-add override.
+
+`ytdlp_path`/`ytdlp_cookies` follow the same shape `ffmpeg_path` established:
+`Option<String>`, `#[serde(default)]` so settings files predating the field
+still deserialize, resolved fresh per call rather than cached (see "Video
+format/quality lookup" → "Cookies" above).
 
 ## Download all (sequential, continue past failures)
 
@@ -544,10 +603,15 @@ secrecy.
 
 ## Muxing extension point
 
-`y7dl` doesn't mux DASH streams, so a video-only or audio-only format is saved
-to its own clearly-labeled file (`<title>.video.<ext>` / `<title>.audio.<ext>`);
-a progressive format is saved as `<title>.<ext>`. `core::download::output` owns
-this naming.
+`core::download` always requests one plain itag/`format_id` (never a
+yt-dlp `video+audio` merge expression), so a video-only or audio-only format
+is saved to its own clearly-labeled file (`<title>.video.<ext>` /
+`<title>.audio.<ext>`); a progressive format is saved as `<title>.<ext>`.
+`core::download::output` owns this naming. yt-dlp *can* merge separate
+video/audio formats into one file via ffmpeg (`-f bestvideo+bestaudio
+--merge-output-format`), but that's deliberately not used here — it would
+mean every DASH download depends on ffmpeg being present, where today only
+MP3 conversion does.
 
 The `Transcode` trait is the seam a real muxer would plug into — `core` decides
 *when* post-processing happens, satellite crates decide *how* — so muxing can be
@@ -555,7 +619,16 @@ added without a rewrite.
 
 ## License
 
-This project depends on [`y7dl`](https://github.com/erwin-lovecraft/y7dl)
-(GPL-3.0-or-later), so the whole project is licensed GPL-3.0-or-later — see
-[`LICENSE`](../LICENSE). No proprietary/closed dependency may be added to any
-crate that links against `y7dl` (i.e. `core/` and anything depending on it).
+The project is licensed GPL-3.0-or-later — see [`LICENSE`](../LICENSE). That
+choice predates the yt-dlp migration this document describes:
+[`y7dl`](https://github.com/erwin-lovecraft/y7dl) (GPL-3.0-or-later), the
+InnerTube client `core::stream` used to link as a Rust library, is what
+originally forced it. `y7dl` is gone now, and neither of its replacements
+forces GPL the same way: `yt-dlp` and `ffmpeg` are both external processes
+(spawned via `ytdlp/`/`transcode/`, never linked — see each crate's
+`CLAUDE.md`), and yt-dlp itself is Unlicense/public domain. The vendored
+ffmpeg build is GPL specifically because the project already commits to GPL,
+not the other way around. In short: GPL-3.0-or-later remains the project's
+license by choice, not because any current dependency requires it — worth
+knowing if that choice is ever revisited, since the original constraint that
+motivated it no longer applies.

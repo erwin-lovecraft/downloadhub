@@ -13,11 +13,12 @@ layout and architecture decisions.
 
 GPL-3.0-or-later — see [`LICENSE`](LICENSE).
 
-This project's download engine depends on
-[`y7dl`](https://github.com/erwin-lovecraft/y7dl) (GPL-3.0-or-later), which
-in turn is built on [`kkdai/youtube`](https://github.com/kkdai/youtube).
-Because of this, the whole project is GPL-licensed; no proprietary/closed
-dependency may be added to any crate that links against `y7dl`.
+The download engine uses [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
+(Unlicense/public domain) as an external process, not a linked library —
+see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for why. yt-dlp doesn't
+require this project to be GPL-licensed; GPL-3.0-or-later is a choice the
+project keeps regardless (see the License section of `ARCHITECTURE.md` for
+the history — an earlier, now-removed dependency did force it).
 
 Windows installers additionally bundle a static GPL build of
 [FFmpeg](https://ffmpeg.org) as a sidecar, used to convert downloaded
@@ -92,11 +93,53 @@ was removed — macOS users point the Settings option at their own ffmpeg
 (e.g. `brew install ffmpeg`) instead. If no ffmpeg is found anywhere, MP3
 entries fail with a clear message while everything else keeps working.
 
+## Video download engine (yt-dlp sidecar)
+
+All video/format lookup and every download runs through an external
+**yt-dlp**, resolved per call (no restart needed) in the same order as
+ffmpeg above:
+
+1. **Custom path from Settings** — "yt-dlp path" in the Settings dialog.
+2. **Bundled sidecar** — Windows and macOS installers ship the vendored
+   binaries at `tools/yt-dlp.exe` / `tools/yt-dlp_macos` (committed rather
+   than fetched by any package manager or build step; `just sidecar` copies
+   the right one to `src-tauri/binaries/yt-dlp-<triple>[.exe]`, declared in
+   `externalBin` by
+   [`tauri.windows.conf.json`](src-tauri/tauri.windows.conf.json) /
+   [`tauri.macos.conf.json`](src-tauri/tauri.macos.conf.json)). To upgrade
+   yt-dlp, replace the file in `tools/` keeping the name, and commit.
+3. **PATH** — any `yt-dlp` found on PATH (e.g. `pip install yt-dlp` or
+   Homebrew's), the usual dev fallback and the only option on Linux, which
+   has no vendored binary.
+
+The bundled macOS binary is ad-hoc signed but not notarized. In local
+testing this was a milder problem than the previously-vendored (fully
+unsigned) ffmpeg build: the very first execution of a freshly-downloaded
+copy could hang or fail while macOS ran its on-demand security check, but
+every run after that succeeded normally with no user action needed. If
+you hit a stuck or failed first search/download after installing, try
+again, approve the binary once in System Settings → Privacy & Security if
+prompted, or skip the sidecar entirely by setting "yt-dlp path" to a `brew
+install yt-dlp` (or `pip install yt-dlp`) binary instead. If no yt-dlp is
+found anywhere, search, format lookup, and downloads all fail with a clear
+message.
+
+### Cookies (working around "confirm you're not a bot")
+
+YouTube sometimes demands sign-in verification before it will serve
+formats or streams — yt-dlp reports this distinctly, and the app surfaces
+it as a clear error pointing at Settings rather than a generic failure.
+The workaround: export your `youtube.com` cookies from a signed-in browser
+session in Netscape `cookies.txt` format (e.g. with a "Get cookies.txt
+LOCALLY" browser extension) and paste the file's contents into "yt-dlp
+cookies" in the Settings dialog. The app writes them to
+`<platform-data-dir>/downloadhub/cookies.txt` and passes `--cookies` to
+yt-dlp on every call; leave the field empty if you never hit this.
+
 ## Video format/quality lookup
 
-Fetching a video's available formats/qualities uses `y7dl` directly against
-YouTube's InnerTube API — no API key or OAuth needed, and nothing to
-configure.
+Fetching a video's available formats/qualities uses `yt-dlp` (see above) —
+no API key or OAuth needed, and nothing to configure beyond the sidecar.
 
 ## Download queue
 
@@ -107,11 +150,14 @@ its parent directory are created automatically on first run. The output
 folder for each entry can be typed directly or picked via the native
 folder dialog ("Browse..." next to the field).
 
-Each queued entry has a "Start" button that downloads it via `y7dl`'s
-ranged `Range`-request chunking, with a live progress bar streamed from the
-backend. No config needed. A DASH (adaptive) format saves as
+Each queued entry has a "Start" button that downloads it via `yt-dlp`,
+with a live progress bar streamed from the backend. No config needed
+beyond the yt-dlp sidecar above. A DASH (adaptive) format saves as
 `<title>.video.<ext>` and/or `<title>.audio.<ext>` in the output folder
 (no muxing yet); a progressive format saves as a single `<title>.<ext>`.
+An interrupted download resumes from where it left off the next time it's
+started, rather than restarting from scratch — yt-dlp's own default
+behavior.
 
 ## AI agent access (MCP server)
 

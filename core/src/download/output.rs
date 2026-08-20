@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-pub(crate) fn destination_path(output_folder: &str, title: &str, format: &y7dl::Format) -> PathBuf {
+use downloadhub_ytdlp::Format;
+
+pub(crate) fn destination_path(output_folder: &str, title: &str, format: &Format) -> PathBuf {
     let suffix = if format.is_video() && format.has_audio() {
         ""
     } else if format.is_video() {
@@ -10,9 +12,12 @@ pub(crate) fn destination_path(output_folder: &str, title: &str, format: &y7dl::
     } else {
         ".audio"
     };
-    let ext = extension_for(&format.mime_type);
     let mut path = PathBuf::from(output_folder);
-    path.push(format!("{}{suffix}.{ext}", sanitize_filename(title)));
+    path.push(format!(
+        "{}{suffix}.{}",
+        sanitize_filename(title),
+        format.ext
+    ));
     path
 }
 
@@ -22,19 +27,6 @@ pub(crate) fn mp3_destination_path(output_folder: &str, title: &str) -> PathBuf 
     let mut path = PathBuf::from(output_folder);
     path.push(format!("{}.mp3", sanitize_filename(title)));
     path
-}
-
-/// Maps a format's mime type (e.g. `video/mp4; codecs="avc1..."`) to a file
-/// extension. Falls back to `bin` for anything unrecognized rather than
-/// guessing.
-fn extension_for(mime_type: &str) -> &'static str {
-    match mime_type.split(';').next().unwrap_or(mime_type).trim() {
-        "video/mp4" => "mp4",
-        "video/webm" => "webm",
-        "audio/mp4" => "m4a",
-        "audio/webm" => "webm",
-        _ => "bin",
-    }
 }
 
 /// Strips characters invalid in Windows/Unix filenames and caps length well
@@ -83,56 +75,38 @@ mod tests {
         assert_eq!(sanitize_filename(&long).len(), 150);
     }
 
-    #[test]
-    fn extension_for_maps_known_mime_types() {
-        assert_eq!(extension_for(r#"video/mp4; codecs="avc1.42001E""#), "mp4");
-        assert_eq!(extension_for(r#"video/webm; codecs="vp9""#), "webm");
-        assert_eq!(extension_for(r#"audio/mp4; codecs="mp4a.40.2""#), "m4a");
-        assert_eq!(extension_for(r#"audio/webm; codecs="opus""#), "webm");
-        assert_eq!(extension_for("application/octet-stream"), "bin");
-    }
-
-    fn format(mime_type: &str, audio_quality: Option<&str>) -> y7dl::Format {
-        y7dl::Format {
+    fn format(ext: &str, vcodec: Option<&str>, acodec: Option<&str>) -> Format {
+        Format {
             itag: 0,
-            url: None,
-            mime_type: mime_type.to_string(),
-            bitrate: None,
-            average_bitrate: None,
+            ext: ext.to_string(),
+            quality_label: None,
             width: None,
             height: None,
             fps: None,
-            content_length: None,
-            quality: None,
-            quality_label: None,
-            audio_quality: audio_quality.map(str::to_string),
-            audio_sample_rate: None,
-            audio_channels: None,
-            approx_duration_ms: None,
-            signature_cipher: None,
+            bitrate: None,
+            filesize_bytes: None,
+            vcodec: vcodec.map(str::to_string),
+            acodec: acodec.map(str::to_string),
         }
     }
 
     #[test]
     fn destination_path_is_bare_for_progressive_formats() {
-        let f = format("video/mp4; codecs=\"avc1\"", Some("AUDIO_QUALITY_MEDIUM"));
+        let f = format("mp4", Some("avc1"), Some("mp4a.40.2"));
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.mp4"));
     }
 
     #[test]
     fn destination_path_labels_video_only_formats() {
-        let f = format("video/webm; codecs=\"vp9\"", None);
+        let f = format("webm", Some("vp9"), Some("none"));
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.video.webm"));
     }
 
     #[test]
     fn destination_path_labels_audio_only_formats() {
-        let f = format(
-            "audio/mp4; codecs=\"mp4a.40.2\"",
-            Some("AUDIO_QUALITY_MEDIUM"),
-        );
+        let f = format("m4a", Some("none"), Some("mp4a.40.2"));
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.audio.m4a"));
     }

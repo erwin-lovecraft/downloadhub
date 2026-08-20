@@ -1,0 +1,15 @@
+[package]
+name = "downloadhub-ytdlp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Thin async wrapper around an external yt-dlp binary (not linked as a library): video/format metadata lookup and progress-reporting downloads."
+
+[lib]
+name = "downloadhub_ytdlp"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["process", "io-util", "rt", "macros"] }

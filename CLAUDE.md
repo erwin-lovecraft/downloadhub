@@ -4,17 +4,17 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 Each crate has its own `CLAUDE.md` with the detail for that layer:
 [`core/`](core/CLAUDE.md), [`src-tauri/`](src-tauri/CLAUDE.md),
-[`mcp-server/`](mcp-server/CLAUDE.md), [`transcode/`](transcode/CLAUDE.md).
-Design decisions and their rationale live in
+[`mcp-server/`](mcp-server/CLAUDE.md), [`transcode/`](transcode/CLAUDE.md),
+[`ytdlp/`](ytdlp/CLAUDE.md). Design decisions and their rationale live in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## What this project is
 
 An AI-powered YouTube downloader desktop app (Tauri + React): keyword search via
-the YouTube Data API, playlist import, a SQLite-backed download queue, chunked
-downloads via `y7dl`, and optional MP3 conversion via ffmpeg. A separate MCP
-server binary lets external AI agents search and fill the queue — but never
-start a download.
+the YouTube Data API, playlist import, a SQLite-backed download queue,
+downloads via an external `yt-dlp` process, and optional MP3 conversion via
+ffmpeg. A separate MCP server binary lets external AI agents search and fill
+the queue — but never start a download.
 
 `core::auth` implements a Google OAuth installed-app/loopback flow with keychain
 token storage, but **nothing currently calls it**: there are no `auth_*` Tauri
@@ -23,7 +23,7 @@ as dormant, not as a shipped feature.
 
 ## Workspace layout
 
-Cargo workspace with four members plus a Vite/React frontend in top-level
+Cargo workspace with five members plus a Vite/React frontend in top-level
 `src/`:
 
 | Path | Package | Role |
@@ -31,25 +31,28 @@ Cargo workspace with four members plus a Vite/React frontend in top-level
 | `core/` | `downloadhub-core` | Business logic. No `tauri` dependency. |
 | `src-tauri/` | `downloadhub` | Tauri app: thin commands + event emission. |
 | `transcode/` | `downloadhub-transcode` | ffmpeg process wrapper (MP3). |
+| `ytdlp/` | `downloadhub-ytdlp` | yt-dlp process wrapper (metadata + download). |
 | `mcp-server/` | `downloadhub-mcp-server` | MCP tools over stdio. |
 
-Dependency arrows all point at `core`; `core` depends on none of the others.
-Both binaries share one SQLite database rather than talking over IPC.
+`core` depends on `ytdlp` directly (metadata/download lookup isn't optional
+the way transcoding is); `transcode` depends on `core`, implementing a trait
+`core` defines, since MP3 conversion *is* optional and mcp-server never needs
+it. Both binaries share one SQLite database rather than talking over IPC.
 
 ## Hard constraints
 
-- **License:** the download engine depends on
-  [`y7dl`](https://github.com/erwin-lovecraft/y7dl) (GPL-3.0-or-later), so the
-  whole project is GPL-3.0-or-later. Do not add proprietary or closed
-  dependencies to any crate linking against `y7dl`. Attribution to `y7dl` and
-  its upstream (`kkdai/youtube`) in the README is required.
+- **License:** the project is GPL-3.0-or-later (see [`LICENSE`](LICENSE)).
+  `yt-dlp` and `ffmpeg` are external processes, not linked libraries — see
+  `ytdlp/CLAUDE.md` and `transcode/CLAUDE.md` for why each is vendored the way
+  it is. yt-dlp itself is Unlicense/public domain; the vendored ffmpeg build is
+  GPL, which is why a GPL build was chosen for it. Do not add proprietary or
+  closed dependencies without checking this still holds.
 - **The MCP server must never be able to start a download.** This is enforced by
   the tool surface — no tool exists that starts a transfer — not by a runtime
   check. Do not add one. See `docs/ARCHITECTURE.md`, "Where the agent boundary
   sits".
-- **Respect YouTube's terms of service** as noted in `y7dl`'s own README. Don't
-  add features that circumvent rate limits or work around API restrictions
-  beyond what `y7dl` already does.
+- **Respect YouTube's terms of service.** Don't add features that circumvent
+  rate limits or work around API restrictions beyond what yt-dlp already does.
 
 ## Commands
 
@@ -78,7 +81,7 @@ Rust (from the repo root, against the workspace):
 ## Conventions
 
 - No `unwrap()`/`panic!` on I/O or network paths; use the `Result`-based error
-  pattern `y7dl` itself uses.
+  pattern already used throughout `core`.
 - Prioritize unit tests for queue state transitions in `core/`; keep at least a
   smoke test for Tauri commands in `src-tauri/`.
 - TypeScript strict mode is on; no `any` without a justifying comment.
@@ -96,8 +99,6 @@ Rust (from the repo root, against the workspace):
 - Concurrent downloads (configurable limit, default ~3). Today each
   `start_download` spawns an unbounded task; "Download all" is strictly
   sequential.
-- Resumable downloads via range requests. An interrupted download restarts from
-  scratch.
 - A `docs/design/` export of the Fluent design reference. Until it exists, use
   clean shadcn/ui defaults rather than improvising a different visual direction.
 

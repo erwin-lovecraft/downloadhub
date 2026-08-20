@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "src-tauri", "mcp-server", "transcode"]
+members = ["core", "src-tauri", "mcp-server", "transcode", "ytdlp"]
 
 [workspace.package]
 version = "1.0.6"

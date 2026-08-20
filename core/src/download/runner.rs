@@ -1,15 +1,13 @@
 //! Download orchestrator: runs one queue entry (plus optional MP3 transcode) to
 //! completion, updating its `QueueStore` status along the way.
 
-use std::time::Instant;
-
 use tokio_util::sync::CancellationToken;
 
 use crate::queue::{QueueError, QueueStatus, QueueStore};
-use crate::stream::{StreamClient, StreamError};
+use crate::stream::{StreamClient, StreamError, YtDlpConfig};
 
 use super::output::{destination_path, mp3_destination_path};
-use super::progress::{DownloadPhase, DownloadProgress, ProgressWriter};
+use super::progress::{DownloadPhase, DownloadProgress, Throttle};
 use super::transcode::{BoxError, Transcode};
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +36,10 @@ pub enum DownloadError {
 pub struct DownloadContext<'a> {
     pub stream_client: &'a StreamClient,
     pub store: &'a QueueStore,
+    /// Resolved fresh by the caller (settings override, bundled sidecar, or
+    /// PATH) before each `run_download`/`run_all_queued` call, so a changed
+    /// yt-dlp path or cookies apply without a restart.
+    pub ytdlp_config: &'a YtDlpConfig,
     /// `None` when no ffmpeg binary was found at startup; entries flagged
     /// `convert_to_mp3` then fail with a clear message instead of silently
     /// keeping the m4a.
@@ -156,13 +158,16 @@ async fn download_entry(
     queue_id: i64,
     entry: &crate::queue::QueueEntry,
     ctx: &DownloadContext<'_>,
-    on_progress: &mut impl FnMut(DownloadProgress),
+    on_progress: &mut (impl FnMut(DownloadProgress) + Send),
 ) -> Result<DownloadProgress, DownloadError> {
-    let video = ctx.stream_client.fetch_video(&entry.video_id).await?;
+    let video = ctx
+        .stream_client
+        .fetch_video(&entry.video_id, ctx.ytdlp_config)
+        .await?;
     let format = video
         .format_by_itag(entry.itag)
         .ok_or(DownloadError::FormatNotFound(entry.itag))?;
-    let total_bytes = format.content_length().unwrap_or(0);
+    let total_bytes = format.filesize_bytes.unwrap_or(0);
 
     // Validate the conversion prerequisites up front so a doomed entry
     // fails before spending bandwidth on the download.
@@ -177,19 +182,26 @@ async fn download_entry(
 
     tokio::fs::create_dir_all(&entry.output_path).await?;
     let dest_path = destination_path(&entry.output_path, &entry.title, format);
-    let mut file = tokio::fs::File::create(&dest_path).await?;
 
-    let mut writer = ProgressWriter {
-        inner: &mut file,
-        queue_id,
-        total_bytes,
-        written: 0,
-        last_emit: Instant::now(),
-        on_progress,
-    };
+    let mut throttle = Throttle::new();
     let bytes_written = ctx
         .stream_client
-        .download(&video, format, &mut writer)
+        .download(
+            &entry.video_id,
+            entry.itag,
+            &dest_path,
+            ctx.ytdlp_config,
+            |downloaded, total| {
+                if throttle.should_emit() {
+                    on_progress(DownloadProgress {
+                        queue_id,
+                        bytes_written: downloaded,
+                        total_bytes: if total > 0 { total } else { total_bytes },
+                        phase: DownloadPhase::Downloading,
+                    });
+                }
+            },
+        )
         .await?;
 
     if let Some(transcoder) = transcoder {
@@ -221,7 +233,7 @@ async fn download_entry(
 mod tests {
     use super::*;
     use crate::queue::{NewQueueEntry, QueueStore};
-    use crate::stream::StreamClient;
+    use crate::stream::{StreamClient, YtDlpConfig};
 
     fn new_entry(video_id: &str) -> NewQueueEntry {
         NewQueueEntry {
@@ -240,9 +252,11 @@ mod tests {
         store.add_entry(new_entry("a")).await.unwrap();
         store.add_entry(new_entry("b")).await.unwrap();
 
+        let ytdlp_config = YtDlpConfig::default();
         let ctx = DownloadContext {
             stream_client: &StreamClient::new(),
             store: &store,
+            ytdlp_config: &ytdlp_config,
             transcoder: None,
         };
         let cancel = CancellationToken::new();
@@ -266,9 +280,11 @@ mod tests {
     #[tokio::test]
     async fn an_uncancelled_token_with_an_empty_queue_finishes_without_stopping() {
         let store = QueueStore::open_in_memory().unwrap();
+        let ytdlp_config = YtDlpConfig::default();
         let ctx = DownloadContext {
             stream_client: &StreamClient::new(),
             store: &store,
+            ytdlp_config: &ytdlp_config,
             transcoder: None,
         };
 

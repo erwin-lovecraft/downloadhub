@@ -13,7 +13,7 @@ import type { FormatSummary } from "@/lib/video";
 import type { QueueEntry } from "@/lib/queue";
 
 function formatLabel(format: FormatSummary): string {
-  return format.quality_label ?? format.quality ?? "audio";
+  return format.quality_label ?? "audio";
 }
 
 function trackLabel(format: FormatSummary): string {

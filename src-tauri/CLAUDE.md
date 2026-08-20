@@ -38,7 +38,9 @@ There are no `auth_*` commands — `core::auth` is dormant.
 ## `AppState`
 
 Holds, for the app's lifetime: the YouTube API key, one reused `StreamClient`
-(`y7dl::Client` caches parsed player JS and pools connections), the `QueueStore`
+(a stateless marker now — yt-dlp is a subprocess spawned fresh per call, so
+there's no connection or cache to hold onto; kept for call-site stability),
+the `QueueStore`
 (`Option` — if the data dir or DB can't be opened, queue commands report it
 rather than the app failing to start), the app data dir, a
 `Mutex<HashMap<queue_id, JoinHandle>>` of in-flight downloads, and
@@ -51,8 +53,9 @@ Two invariants worth preserving:
   `start_download`/`cancel_download`/`remove_from_queue`/the re-format commands
   all call `ensure_no_batch_running` first, because `download_all` bypasses the
   handle registry and a per-entry command racing it has no safe outcome.
-- `resolve_transcoder` runs **per download start**, not once at startup, so
-  changing the ffmpeg path in settings takes effect without a restart.
+- `resolve_transcoder` and `resolve_ytdlp_config` both run **per call**, not
+  once at startup, so changing the ffmpeg path, yt-dlp path, or yt-dlp cookies
+  in settings takes effect without a restart.
 
 ## Events
 
@@ -83,8 +86,25 @@ download's folder).
 
 ## Sidecars
 
-`mcp-server` (all platforms) and `ffmpeg` (Windows only) are declared as
-`externalBin`. `tauri.windows.conf.json` JSON-*merges* over `tauri.conf.json`,
-so its `externalBin` array must repeat `binaries/mcp-server`. Sidecars are
+`mcp-server` (all platforms), `yt-dlp` (Windows and macOS), and `ffmpeg`
+(Windows only) are declared as `externalBin`. `tauri.windows.conf.json` and
+`tauri.macos.conf.json` JSON-*merge* over `tauri.conf.json`, so each platform
+file's `externalBin` array must repeat `binaries/mcp-server`. Sidecars are
 staged by `just sidecar`; `pnpm tauri build` alone does not stage them, and
 `tauri dev` never does.
+
+The yt-dlp macOS binary is vendored the same way ffmpeg's Windows one is
+(`tools/yt-dlp_macos`, committed rather than fetched). Unlike the previously-
+vendored ffmpeg macOS binary (removed after Gatekeeper flatly rejected it —
+see `transcode/CLAUDE.md`), yt-dlp's release build carries an ad-hoc code
+signature (`codesign -dv` shows `Signature=adhoc`), which changes the
+Gatekeeper story: `spctl -a -vv` still reports it rejected, but in local
+testing the *first* direct execution of a freshly-quarantined copy hung/was
+killed (macOS running its on-demand security check) while every execution
+after that succeeded normally, including runs from `tokio::process::Command`.
+That's a rougher edge than "just works," but a materially different failure
+mode than ffmpeg's outright block — worth re-verifying against a real signed
+or notarized `.app` bundle before trusting this note further. Bundled anyway
+because a user past that first hiccup gets a working sidecar with no extra
+setup; anyone who doesn't falls back to the `ytdlp_path` setting or PATH,
+same as ffmpeg on macOS.

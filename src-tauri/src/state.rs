@@ -125,6 +125,26 @@ impl AppState {
         downloadhub_transcode::locate_ffmpeg().map(Transcoder::new)
     }
 
+    /// Resolves yt-dlp's binary path override and cookies file, re-read on
+    /// every search/download so a settings change (a new binary path,
+    /// updated cookies) applies without restarting. Falls back to
+    /// `YtDlpConfig::default()` — auto-locate the binary, no cookies — if
+    /// settings can't be read at all (e.g. no writable app data directory).
+    pub async fn resolve_ytdlp_config(&self) -> downloadhub_core::stream::YtDlpConfig {
+        let Some(settings_path) = self.settings_path.as_deref() else {
+            return downloadhub_core::stream::YtDlpConfig::default();
+        };
+        let Some(app_data_dir) = settings_path.parent() else {
+            return downloadhub_core::stream::YtDlpConfig::default();
+        };
+        match downloadhub_core::settings::load(settings_path).await {
+            Ok(settings) => {
+                downloadhub_core::stream::resolve_ytdlp_config(app_data_dir, &settings).await
+            }
+            Err(_) => downloadhub_core::stream::YtDlpConfig::default(),
+        }
+    }
+
     /// Errors out if a `download_all` batch is currently running. Shared by
     /// every command that individually starts, cancels, or removes a queue
     /// entry, since those would race with the batch's own handling of the

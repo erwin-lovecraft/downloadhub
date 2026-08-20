@@ -12,7 +12,7 @@ Rationale for the decisions below lives in
 | Module | Responsibility |
 | --- | --- |
 | `youtube` | YouTube Data API v3 client: `search.list`, `videos.list`, `playlistItems.list`. Direct `reqwest` + `serde`, not the generated crate. |
-| `stream` | `y7dl` wrapper (`StreamClient`), format DTOs, and `FormatPreference` selection. |
+| `stream` | `yt-dlp` wrapper (`StreamClient`), format DTOs, and `FormatPreference` selection. |
 | `queue` | SQLite-backed download queue: entry types, schema, SQL, async store. |
 | `enqueue` | Bulk add / re-format driven by a `FormatPreference` rather than an itag. |
 | `download` | Download orchestration, progress reporting, output naming, the `Transcode` seam. |
@@ -35,7 +35,8 @@ Keep it that way when adding files.
 - `auth/` → `flow` (OAuth wire), `tokens` (models/expiry), `keychain`
 - `youtube/` → `client` (HTTP), `models` (public), `response` (wire shapes),
   `duration` (ISO 8601)
-- `stream/` → `client`, `models`
+- `stream/` → `client`, `models`, `config` (`YtDlpConfig` resolution from
+  settings)
 
 ## Rules specific to this crate
 
@@ -53,8 +54,11 @@ Keep it that way when adding files.
 - **`rusqlite` is blocking** — every store method must go through
   `spawn_blocking`.
 - **No `unwrap()`/`panic!` on I/O or network paths.** Return `Result`.
-- **GPL:** this crate links `y7dl` (GPL-3.0-or-later). Do not add proprietary or
-  closed dependencies here.
+- **yt-dlp/ffmpeg config is resolved fresh per call, never cached** — see
+  `stream::resolve_ytdlp_config` and `settings::AppSettings`'s `ytdlp_path`/
+  `ytdlp_cookies`/`ffmpeg_path` fields. A settings change (new binary path,
+  updated cookies) must apply to the very next call, matching `mcp_enabled`'s
+  existing per-call re-read.
 
 ## Testing
 

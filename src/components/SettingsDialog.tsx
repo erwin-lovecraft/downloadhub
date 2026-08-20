@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { pickFile, pickOutputFolder } from "@/lib/dialog";
 import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
 import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
@@ -26,6 +27,8 @@ export function SettingsDialog({
   const [quality, setQuality] = useState<FormatPreference>("best_progressive");
   const [mcpEnabled, setMcpEnabled] = useState(true);
   const [ffmpegPath, setFfmpegPath] = useState("");
+  const [ytdlpPath, setYtdlpPath] = useState("");
+  const [ytdlpCookies, setYtdlpCookies] = useState("");
   const [serverPath, setServerPath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -35,6 +38,8 @@ export function SettingsDialog({
       setQuality(settings.data.default_quality);
       setMcpEnabled(settings.data.mcp_enabled);
       setFfmpegPath(settings.data.ffmpeg_path ?? "");
+      setYtdlpPath(settings.data.ytdlp_path ?? "");
+      setYtdlpCookies(settings.data.ytdlp_cookies ?? "");
     }
   }, [settings.data]);
 
@@ -151,6 +156,50 @@ export function SettingsDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">yt-dlp path</label>
+              <div className="flex gap-2">
+                <Input
+                  value={ytdlpPath}
+                  onChange={(e) => setYtdlpPath(e.target.value)}
+                  placeholder="e.g. /opt/homebrew/bin/yt-dlp"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={async () => {
+                    const file = await pickFile();
+                    if (file) setYtdlpPath(file);
+                  }}
+                >
+                  Browse...
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave empty to use the bundled yt-dlp or one found on PATH.
+                Applies to the next search or download — no restart needed.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">yt-dlp cookies</label>
+              <Textarea
+                value={ytdlpCookies}
+                onChange={(e) => setYtdlpCookies(e.target.value)}
+                placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	...	...	..."
+                className="min-h-24 font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                If YouTube starts asking to "confirm you're not a bot", export
+                your youtube.com cookies (Netscape/cookies.txt format, e.g.
+                with a "Get cookies.txt" browser extension while signed in)
+                and paste the file's contents here. Stored locally and passed
+                to yt-dlp; leave empty if you don't need this.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <label className="flex items-center gap-2 text-sm font-medium">
                 <Checkbox
                   checked={mcpEnabled}
@@ -191,6 +240,8 @@ export function SettingsDialog({
                   default_quality: quality,
                   mcp_enabled: mcpEnabled,
                   ffmpeg_path: ffmpegPath.trim() || null,
+                  ytdlp_path: ytdlpPath.trim() || null,
+                  ytdlp_cookies: ytdlpCookies.trim() || null,
                 })
               }
             >

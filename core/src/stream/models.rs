@@ -6,10 +6,10 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct FormatSummary {
     pub itag: u32,
-    pub mime_type: String,
-    /// Coarse quality bucket, e.g. `tiny`, `hd720`.
-    pub quality: Option<String>,
-    /// Human label for video formats, e.g. `720p`, `1080p60`.
+    /// File extension yt-dlp reports for this stream, e.g. `mp4`, `webm`,
+    /// `m4a`.
+    pub ext: String,
+    /// Human label for video formats, e.g. `720p`, `1080p`.
     pub quality_label: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -20,18 +20,17 @@ pub struct FormatSummary {
     pub has_audio: bool,
 }
 
-impl From<y7dl::Format> for FormatSummary {
-    fn from(format: y7dl::Format) -> Self {
+impl From<downloadhub_ytdlp::Format> for FormatSummary {
+    fn from(format: downloadhub_ytdlp::Format) -> Self {
         Self {
             itag: format.itag,
-            mime_type: format.mime_type.clone(),
-            quality: format.quality.clone(),
+            ext: format.ext.clone(),
             quality_label: format.quality_label.clone(),
             width: format.width,
             height: format.height,
             fps: format.fps,
             bitrate: format.bitrate,
-            content_length_bytes: format.content_length(),
+            content_length_bytes: format.filesize_bytes,
             has_video: format.is_video(),
             has_audio: format.has_audio(),
         }
@@ -44,8 +43,9 @@ pub struct VideoDetail {
     pub title: String,
     pub author: String,
     pub duration_seconds: u64,
-    /// Progressive formats first, then adaptive (video-only/audio-only) ones
-    /// — the order `y7dl::Video::formats` already returns them in.
+    /// In whatever order yt-dlp's format list returns them (roughly
+    /// ascending quality) — callers needing a specific pick use
+    /// `select_format`/`FormatPreference` rather than relying on order.
     pub formats: Vec<FormatSummary>,
 }
 
@@ -136,8 +136,7 @@ mod tests {
     ) -> FormatSummary {
         FormatSummary {
             itag,
-            mime_type: "video/mp4".to_string(),
-            quality: None,
+            ext: "mp4".to_string(),
             quality_label: None,
             width: None,
             height,

@@ -93,11 +93,13 @@ pub async fn set_queue_entries_quality(
     state: State<'_, AppState>,
 ) -> Result<ReformatOutcome, String> {
     state.ensure_no_batch_running()?;
+    let ytdlp_config = state.resolve_ytdlp_config().await;
     enqueue::reformat_entries(
         &state.stream_client,
         state.queue_store()?,
         &queue_ids,
         preference,
+        &ytdlp_config,
     )
     .await
     .map_err(|e| e.to_string())

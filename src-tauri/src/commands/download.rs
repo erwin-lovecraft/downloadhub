@@ -140,9 +140,11 @@ pub async fn spawn_download<R: tauri::Runtime>(
             return;
         };
         let transcoder = state.resolve_transcoder().await;
+        let ytdlp_config = state.resolve_ytdlp_config().await;
         let ctx = DownloadContext {
             stream_client: &state.stream_client,
             store,
+            ytdlp_config: &ytdlp_config,
             transcoder: transcoder.as_ref().map(|t| t as &dyn Transcode),
         };
 
@@ -280,9 +282,11 @@ async fn run_batch<R: tauri::Runtime>(
 ) -> Result<BatchDownloadOutcome, String> {
     let store = state.queue_store()?;
     let transcoder = state.resolve_transcoder().await;
+    let ytdlp_config = state.resolve_ytdlp_config().await;
     let ctx = DownloadContext {
         stream_client: &state.stream_client,
         store,
+        ytdlp_config: &ytdlp_config,
         transcoder: transcoder.as_ref().map(|t| t as &dyn Transcode),
     };
 

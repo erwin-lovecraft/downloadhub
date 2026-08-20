@@ -1,10 +1,7 @@
-//! Progress types and the throttled `AsyncWrite` wrapper that produces them.
+//! Progress types and the time-based throttle used while forwarding yt-dlp's
+//! download callbacks.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-
-use tokio::io::{self, AsyncWrite};
 
 /// Which step of an entry's pipeline a progress report describes. There is
 /// no percentage for `Transcoding` (ffmpeg's duration isn't predicted);
@@ -26,51 +23,28 @@ pub struct DownloadProgress {
 
 pub(crate) const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Wraps a destination writer, invoking `on_progress` (throttled) after
-/// each successful write so callers get incremental progress without
-/// modifying `y7dl` itself.
-pub(crate) struct ProgressWriter<'a, W, F> {
-    pub(crate) inner: W,
-    pub(crate) queue_id: i64,
-    pub(crate) total_bytes: u64,
-    pub(crate) written: u64,
-    pub(crate) last_emit: Instant,
-    pub(crate) on_progress: &'a mut F,
+/// Time-based rate limiter: `should_emit()` returns `true` at most once per
+/// [`PROGRESS_EMIT_INTERVAL`], regardless of how often it's called — so a
+/// caller getting a raw progress callback per yt-dlp output line can forward
+/// a bounded rate to a UI event emitter.
+pub(crate) struct Throttle {
+    last_emit: Instant,
 }
 
-impl<W, F> AsyncWrite for ProgressWriter<'_, W, F>
-where
-    W: AsyncWrite + Unpin,
-    F: FnMut(DownloadProgress),
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        let this = self.get_mut();
-        let poll = Pin::new(&mut this.inner).poll_write(cx, buf);
-        if let Poll::Ready(Ok(n)) = &poll {
-            this.written += *n as u64;
-            let now = Instant::now();
-            if now.duration_since(this.last_emit) >= PROGRESS_EMIT_INTERVAL {
-                this.last_emit = now;
-                (this.on_progress)(DownloadProgress {
-                    queue_id: this.queue_id,
-                    bytes_written: this.written,
-                    total_bytes: this.total_bytes,
-                    phase: DownloadPhase::Downloading,
-                });
-            }
+impl Throttle {
+    pub(crate) fn new() -> Self {
+        Self {
+            last_emit: Instant::now() - PROGRESS_EMIT_INTERVAL,
         }
-        poll
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    pub(crate) fn should_emit(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.last_emit) >= PROGRESS_EMIT_INTERVAL {
+            self.last_emit = now;
+            true
+        } else {
+            false
+        }
     }
 }

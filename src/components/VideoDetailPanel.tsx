@@ -17,7 +17,6 @@ import type { FormatSummary } from "@/lib/video";
 
 function formatLabel(format: FormatSummary): string {
   if (format.quality_label) return format.quality_label;
-  if (format.quality) return format.quality;
   return "audio";
 }
 

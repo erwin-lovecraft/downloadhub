@@ -27,6 +27,12 @@ pub fn settings_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("settings.json")
 }
 
+/// Where the yt-dlp cookies file (written from the settings' pasted cookie
+/// text) lives inside [`app_data_dir`].
+pub fn cookies_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("cookies.txt")
+}
+
 /// The OS "Downloads" folder, used as the last-resort destination when the
 /// user hasn't configured a default output folder. `None` on a system with
 /// no such folder, where the caller must ask for an explicit path instead.

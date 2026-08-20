@@ -35,6 +35,18 @@ pub struct AppSettings {
     /// see `AppState::resolve_transcoder` in `src-tauri`.
     #[serde(default)]
     pub ffmpeg_path: Option<String>,
+    /// Custom path to a yt-dlp binary. `None` (the default) falls back to
+    /// the bundled sidecar or a yt-dlp on PATH — see
+    /// `core::stream::resolve_ytdlp_config`.
+    #[serde(default)]
+    pub ytdlp_path: Option<String>,
+    /// Cookies to pass to yt-dlp (Netscape `cookies.txt` format), pasted by
+    /// the user. YouTube sometimes demands sign-in verification ("confirm
+    /// you're not a bot") before it will serve formats or streams; cookies
+    /// from a signed-in browser session work around that. `None`/empty
+    /// means no `--cookies` flag is passed.
+    #[serde(default)]
+    pub ytdlp_cookies: Option<String>,
 }
 
 fn default_mcp_enabled() -> bool {
@@ -48,6 +60,8 @@ impl Default for AppSettings {
             default_quality: FormatPreference::default(),
             mcp_enabled: true,
             ffmpeg_path: None,
+            ytdlp_path: None,
+            ytdlp_cookies: None,
         }
     }
 }
@@ -90,6 +104,8 @@ mod tests {
             default_quality: FormatPreference::BestAudioOnly,
             mcp_enabled: false,
             ffmpeg_path: Some("/opt/homebrew/bin/ffmpeg".to_string()),
+            ytdlp_path: Some("/opt/homebrew/bin/yt-dlp".to_string()),
+            ytdlp_cookies: Some("# Netscape HTTP Cookie File\n".to_string()),
         };
         save(&path, &settings).await.unwrap();
 

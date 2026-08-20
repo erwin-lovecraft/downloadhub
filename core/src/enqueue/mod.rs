@@ -3,7 +3,7 @@
 //! fails to resolve is skipped and reported rather than aborting the batch.
 
 use crate::queue::{NewQueueEntry, QueueEntry, QueueError, QueueStore};
-use crate::stream::{FormatPreference, StreamClient};
+use crate::stream::{FormatPreference, StreamClient, YtDlpConfig};
 
 /// One video that couldn't be processed, and why.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -41,12 +41,16 @@ pub async fn enqueue_videos(
     videos: &[String],
     preference: FormatPreference,
     output_path: &str,
+    ytdlp_config: &YtDlpConfig,
 ) -> Result<EnqueueOutcome, QueueError> {
     let mut added = Vec::with_capacity(videos.len());
     let mut skipped = Vec::new();
 
     for video in videos {
-        match stream_client.resolve_queue_format(video, preference).await {
+        match stream_client
+            .resolve_queue_format(video, preference, ytdlp_config)
+            .await
+        {
             Ok((detail, format)) => {
                 let entry = queue_store
                     .add_entry(NewQueueEntry {
@@ -82,6 +86,7 @@ pub async fn reformat_entries(
     queue_store: &QueueStore,
     queue_ids: &[i64],
     preference: FormatPreference,
+    ytdlp_config: &YtDlpConfig,
 ) -> Result<ReformatOutcome, QueueError> {
     use crate::queue::QueueStatus;
 
@@ -105,7 +110,7 @@ pub async fn reformat_entries(
         }
 
         match stream_client
-            .resolve_queue_format(&entry.video_id, preference)
+            .resolve_queue_format(&entry.video_id, preference, ytdlp_config)
             .await
         {
             Ok((_, format)) => {

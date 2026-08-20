@@ -48,26 +48,40 @@ bump-version version="":
 
 # Sidecars live at src-tauri/binaries/<name>-<triple>[.exe] so `tauri
 # build` bundles them inside the desktop app — one installer ships
-# everything. mcp-server is built from this workspace; ffmpeg (used for
-# the MP3 transcode step) is a static GPL build vendored in tools/ —
-# deliberately a committed binary rather than a fetch-at-build-time
-# dependency (see README "MP3 conversion (ffmpeg sidecar)"). Windows only
-# for now (`tauri.windows.conf.json` adds it to `externalBin` there): a
-# vendored unsigned macOS binary gets blocked by Gatekeeper, so macOS
-# relies on the custom ffmpeg path setting or PATH instead.
+# everything. mcp-server is built from this workspace. ffmpeg (used for
+# the MP3 transcode step) and yt-dlp (used for all video lookup/download)
+# are vendored binaries in tools/ — deliberately committed rather than a
+# fetch-at-build-time dependency, so builds are reproducible from a bare
+# checkout (see README). ffmpeg is Windows-only for now
+# (`tauri.windows.conf.json` adds it to `externalBin` there): a vendored
+# unsigned macOS binary gets blocked by Gatekeeper, so macOS relies on the
+# custom ffmpeg path setting or PATH instead. yt-dlp is vendored for both
+# Windows and macOS (`tauri.windows.conf.json` / `tauri.macos.conf.json`);
+# a macOS build may still need Gatekeeper approval once (or the yt-dlp
+# path setting / PATH as a fallback, same as ffmpeg). Linux has no
+# vendored yt-dlp binary and relies on PATH.
 
-# Build the mcp-server binary and stage it (plus, on Windows, the vendored
-# ffmpeg) as Tauri sidecars.
+# Build the mcp-server binary and stage it (plus the vendored ffmpeg/yt-dlp
+# binaries relevant to this OS) as Tauri sidecars.
 [windows]
 sidecar: _build-mcp-server
     New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
     Copy-Item target/release/mcp-server{{exe}} src-tauri/binaries/mcp-server-{{triple}}{{exe}}
     Copy-Item tools/ffmpeg-windows-x86_64.exe src-tauri/binaries/ffmpeg-{{triple}}{{exe}}
+    Copy-Item tools/yt-dlp.exe src-tauri/binaries/yt-dlp-{{triple}}{{exe}}
 
 [unix]
 sidecar: _build-mcp-server
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p src-tauri/binaries
     cp target/release/mcp-server{{exe}} src-tauri/binaries/mcp-server-{{triple}}{{exe}}
+    if [ "{{os()}}" = "macos" ]; then
+        cp tools/yt-dlp_macos src-tauri/binaries/yt-dlp-{{triple}}
+        chmod +x src-tauri/binaries/yt-dlp-{{triple}}
+    else
+        echo "no vendored yt-dlp binary for {{os()}}; the app will fall back to PATH"
+    fi
 
 _build-mcp-server:
     cargo build --release -p downloadhub-mcp-server

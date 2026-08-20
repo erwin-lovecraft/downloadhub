@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface FormatSummary {
   itag: number;
-  mime_type: string;
-  quality: string | null;
+  /** File extension yt-dlp reports for this stream, e.g. "mp4", "webm", "m4a". */
+  ext: string;
   quality_label: string | null;
   width: number | null;
   height: number | null;

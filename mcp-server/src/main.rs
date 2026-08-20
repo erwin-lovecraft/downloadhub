@@ -31,6 +31,7 @@ Both accept a LIST of videos: queue everything in one call rather than calling o
 struct DownloadHub {
     stream_client: Arc<StreamClient>,
     queue_store: Arc<QueueStore>,
+    app_data_dir: PathBuf,
     settings_path: PathBuf,
     youtube_api_key: Option<String>,
     tool_router: ToolRouter<Self>,
@@ -123,9 +124,19 @@ impl DownloadHub {
             stream_client: Arc::new(StreamClient::new()),
             queue_store: Arc::new(queue_store),
             settings_path: downloadhub_core::paths::settings_path(&app_data_dir),
+            app_data_dir,
             youtube_api_key: downloadhub_core::secrets::youtube_api_key(),
             tool_router: Self::tool_router(),
         })
+    }
+
+    /// Resolves yt-dlp's binary path override and cookies file, re-read on
+    /// every call (not cached at startup) for the same reason
+    /// `ensure_enabled` re-reads `mcp_enabled` — a settings change in the
+    /// running desktop app should take effect immediately.
+    async fn ytdlp_config(&self) -> Result<downloadhub_core::stream::YtDlpConfig, String> {
+        let settings = self.settings().await?;
+        Ok(downloadhub_core::stream::resolve_ytdlp_config(&self.app_data_dir, &settings).await)
     }
 
     /// Errors unless the user has MCP access enabled in the app settings.
@@ -206,9 +217,10 @@ impl DownloadHub {
         Parameters(params): Parameters<GetVideoFormatsParams>,
     ) -> Result<String, String> {
         self.ensure_enabled().await?;
+        let ytdlp_config = self.ytdlp_config().await?;
         let detail = self
             .stream_client
-            .get_video_formats(&params.video)
+            .get_video_formats(&params.video, &ytdlp_config)
             .await
             .map_err(|e| e.to_string())?;
         to_json(&detail)
@@ -289,6 +301,7 @@ impl DownloadHub {
             return Err("no videos given; pass at least one URL or video id".to_string());
         }
         let output_path = self.resolve_output_path(output_path).await?;
+        let ytdlp_config = self.ytdlp_config().await?;
 
         let outcome = enqueue::enqueue_videos(
             &self.stream_client,
@@ -296,6 +309,7 @@ impl DownloadHub {
             &videos,
             quality,
             &output_path,
+            &ytdlp_config,
         )
         .await
         .map_err(|e| e.to_string())?;
