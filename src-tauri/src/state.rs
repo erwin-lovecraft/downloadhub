@@ -9,6 +9,7 @@ use downloadhub_core::download::CancellationToken;
 use downloadhub_core::queue::QueueStore;
 use downloadhub_core::stream::StreamClient;
 use downloadhub_transcode::Transcoder;
+use downloadhub_ytdlp::YtDlpProvider;
 
 pub struct AppState {
     /// `None` means `YOUTUBE_API_KEY` wasn't set; search reports the same.
@@ -62,7 +63,7 @@ impl AppState {
 
         Self {
             youtube_api_key,
-            stream_client: StreamClient::new(),
+            stream_client: StreamClient::new(YtDlpProvider::new()),
             queue_store: app_data_dir.as_deref().and_then(open_queue_store),
             settings_path: app_data_dir
                 .as_deref()

@@ -12,7 +12,7 @@ Rationale for the decisions below lives in
 | Module | Responsibility |
 | --- | --- |
 | `youtube` | YouTube Data API v3 client: `search.list`, `videos.list`, `playlistItems.list`. Direct `reqwest` + `serde`, not the generated crate. |
-| `stream` | `yt-dlp` wrapper (`StreamClient`), format DTOs, and `FormatPreference` selection. |
+| `stream` | The `StreamProvider` trait (the yt-dlp seam), `StreamClient` (format selection built on top of it), format DTOs, and `FormatPreference` selection. No concrete yt-dlp dependency — see `../ytdlp/CLAUDE.md`. |
 | `queue` | SQLite-backed download queue: entry types, schema, SQL, async store. |
 | `enqueue` | Bulk add / re-format driven by a `FormatPreference` rather than an itag. |
 | `download` | Download orchestration, progress reporting, output naming, the `Transcode` seam. |
@@ -35,7 +35,8 @@ Keep it that way when adding files.
 - `auth/` → `flow` (OAuth wire), `tokens` (models/expiry), `keychain`
 - `youtube/` → `client` (HTTP), `models` (public), `response` (wire shapes),
   `duration` (ISO 8601)
-- `stream/` → `client`, `models`, `config` (`YtDlpConfig` resolution from
+- `stream/` → `provider` (`StreamProvider` trait), `client` (`StreamClient`,
+  format selection), `models`, `config` (`YtDlpConfig` resolution from
   settings)
 
 ## Rules specific to this crate
@@ -45,6 +46,13 @@ Keep it that way when adding files.
 - **No concrete transcoder.** `download::Transcode` is an object-safe trait;
   `core` decides *when* post-processing runs, never *how*. Errors cross the seam
   as a boxed `BoxError` that `core` only displays.
+- **No concrete yt-dlp dependency.** `stream::StreamProvider` is an object-safe
+  trait, the same shape as `Transcode`; `core` has no dependency on the `ytdlp`
+  crate at all. `ytdlp` depends on `core` and implements the trait — see
+  `../ytdlp/CLAUDE.md`. Any binary that wants `StreamClient` to actually do
+  something must construct it with a concrete `StreamProvider`
+  (`downloadhub_ytdlp::YtDlpProvider::new()`) itself; `core` never pulls one in
+  for free.
 - **Platform-path-agnostic APIs.** `QueueStore::open` and `settings::load` take
   a `&Path`. `paths` is where platform resolution lives, and it exists in `core`
   only because both binaries must agree on the same directory.

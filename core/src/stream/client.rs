@@ -1,34 +1,25 @@
-//! `StreamClient`, the thin wrapper over `downloadhub_ytdlp::YtDlp`.
+//! `StreamClient`, the business-logic wrapper over a [`StreamProvider`].
 
 use std::path::Path;
 
-use downloadhub_ytdlp::YtDlp;
-
 use super::config::YtDlpConfig;
 use super::models::{select_format, FormatPreference, FormatSummary, ResolvedFormat, VideoDetail};
+use super::provider::StreamProvider;
 use super::StreamError;
 
-/// Stateless marker kept for API-shape stability (call sites hold one
-/// reused instance, mirroring the old `y7dl::Client`-pooling shape) — but
-/// yt-dlp is a subprocess spawned fresh per call, so there's no connection
-/// or cache to actually hold onto. Every method takes a [`YtDlpConfig`]
-/// resolved by the caller so a settings change (binary path, cookies)
-/// applies to the very next call.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct StreamClient;
+/// Wraps whatever [`StreamProvider`] the caller constructs it with (a real
+/// yt-dlp process in production, a test double in unit tests) and adds the
+/// format-selection logic on top, so call sites don't need to depend on a
+/// concrete provider at all.
+pub struct StreamClient {
+    provider: Box<dyn StreamProvider>,
+}
 
 impl StreamClient {
-    pub fn new() -> Self {
-        Self
-    }
-
-    fn resolve(config: &YtDlpConfig) -> Result<YtDlp, StreamError> {
-        let binary_path = config
-            .binary_path
-            .clone()
-            .or_else(downloadhub_ytdlp::locate_ytdlp)
-            .ok_or(StreamError::YtDlpNotFound)?;
-        Ok(YtDlp::new(binary_path, config.cookies_path.clone()))
+    pub fn new(provider: impl StreamProvider + 'static) -> Self {
+        Self {
+            provider: Box::new(provider),
+        }
     }
 
     /// Fetches metadata and the full available format/quality list for a
@@ -38,14 +29,7 @@ impl StreamClient {
         url_or_id: &str,
         config: &YtDlpConfig,
     ) -> Result<VideoDetail, StreamError> {
-        let video = self.fetch_video(url_or_id, config).await?;
-        Ok(VideoDetail {
-            video_id: video.id,
-            title: video.title,
-            author: video.author,
-            duration_seconds: video.duration_secs,
-            formats: video.formats.into_iter().map(FormatSummary::from).collect(),
-        })
+        self.provider.get_video(url_or_id, config).await
     }
 
     /// Fetches a video's formats and picks the one matching `preference`.
@@ -88,19 +72,6 @@ impl StreamClient {
         Ok((detail, resolved))
     }
 
-    /// Fetches raw yt-dlp video metadata (including formats) for a video URL
-    /// or bare ID. Exposed for `core::download`, which needs the raw
-    /// `downloadhub_ytdlp::Format` rather than the IPC-facing `FormatSummary`
-    /// DTO.
-    pub async fn fetch_video(
-        &self,
-        url_or_id: &str,
-        config: &YtDlpConfig,
-    ) -> Result<downloadhub_ytdlp::Video, StreamError> {
-        let ytdlp = Self::resolve(config)?;
-        Ok(ytdlp.fetch_video(url_or_id).await?)
-    }
-
     /// Downloads `itag`'s stream for `url_or_id` to the exact path `dest`.
     /// `on_progress` receives raw `(downloaded_bytes, total_bytes)` calls,
     /// unthrottled — the caller decides how often to forward them.
@@ -111,11 +82,10 @@ impl StreamClient {
         itag: u32,
         dest: &Path,
         config: &YtDlpConfig,
-        on_progress: impl FnMut(u64, u64) + Send,
+        mut on_progress: impl FnMut(u64, u64) + Send,
     ) -> Result<u64, StreamError> {
-        let ytdlp = Self::resolve(config)?;
-        Ok(ytdlp
-            .download(url_or_id, &itag.to_string(), dest, on_progress)
-            .await?)
+        self.provider
+            .download(url_or_id, itag, dest, config, &mut on_progress)
+            .await
     }
 }

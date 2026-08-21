@@ -38,9 +38,10 @@ There are no `auth_*` commands — `core::auth` is dormant.
 ## `AppState`
 
 Holds, for the app's lifetime: the YouTube API key, one reused `StreamClient`
-(a stateless marker now — yt-dlp is a subprocess spawned fresh per call, so
-there's no connection or cache to hold onto; kept for call-site stability),
-the `QueueStore`
+(constructed at startup with a `downloadhub_ytdlp::YtDlpProvider` — yt-dlp is a
+subprocess spawned fresh per call, so there's no connection or cache to hold
+onto; `StreamClient` itself just adds format-selection on top of whatever
+`StreamProvider` it's given, see `core/CLAUDE.md`), the `QueueStore`
 (`Option` — if the data dir or DB can't be opened, queue commands report it
 rather than the app failing to start), the app data dir, a
 `Mutex<HashMap<queue_id, JoinHandle>>` of in-flight downloads, and

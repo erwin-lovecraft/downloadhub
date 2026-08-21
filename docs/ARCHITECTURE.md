@@ -8,11 +8,11 @@ this way" rather than "how it got here".
 Five members:
 
 - **`core/`** (package `downloadhub-core`, lib `downloadhub_core`) — business
-  logic with no `tauri` dependency: YouTube Data API client, `yt-dlp` wrapper,
-  queue manager, download orchestrator, SQLite persistence. Named
-  `downloadhub-core` rather than `core` because `core` is always in Rust's
-  extern prelude and reusing the name causes ambiguous-name resolution errors;
-  the *directory* is still `core/`.
+  logic with no `tauri` dependency: YouTube Data API client, the
+  `StreamProvider` seam, queue manager, download orchestrator, SQLite
+  persistence. Named `downloadhub-core` rather than `core` because `core` is
+  always in Rust's extern prelude and reusing the name causes ambiguous-name
+  resolution errors; the *directory* is still `core/`.
 - **`src-tauri/`** (package `downloadhub`, lib `downloadhub_lib`) — the app
   layer: thin Tauri command handlers calling into `core`, plus event emission
   to the frontend. Keeps the name `src-tauri` because the Tauri CLI hardcodes
@@ -23,20 +23,21 @@ Five members:
   implements `core`'s `download::Transcode` trait; `core` has no dependency on
   it.
 - **`ytdlp/`** (package `downloadhub-ytdlp`) — video metadata lookup and
-  downloads via an external `yt-dlp` process. Unlike `transcode`, **`core`
-  depends on this crate directly** (the position `y7dl` used to hold):
-  metadata/format lookup isn't optional the way MP3 transcoding is, since
-  `mcp-server` needs video lookups but never needs a transcoder.
+  downloads via an external `yt-dlp` process. It depends on `core` and
+  implements `core`'s `stream::StreamProvider` trait; `core` has no dependency
+  on it — the same shape `transcode` uses for ffmpeg.
 - **`mcp-server/`** (package `downloadhub-mcp-server`, binary `mcp-server`) —
   MCP tools over stdio. Depends on `core` so it reuses the same queue manager
   and persistence as the desktop app. See [`MCP_SETUP.md`](MCP_SETUP.md).
 
-Dependency arrows all point at `core`, in one of two shapes: `core` depends
-directly on `ytdlp` (a plain support crate, no trait involved — the same shape
-`y7dl` used to have), while `transcode` depends on `core` and implements a
-trait `core` defines. The difference tracks whether the capability is always
-needed (`core` calling out to `ytdlp`) or genuinely optional and pluggable
-(a `&dyn Transcode` `core::download` may or may not be given).
+Dependency arrows all point at `core`: both `ytdlp` and `transcode` depend on
+`core` and implement a trait `core` defines (`StreamProvider`, `Transcode`),
+never the other way around. `core` never depends on a concrete yt-dlp or
+ffmpeg wrapper, so any binary that only needs part of the picture (`mcp-server`
+never needs a transcoder) can pick which concrete crates to link. The cost is
+that every binary wiring in a `StreamProvider` (`src-tauri`, `mcp-server`) must
+depend on `ytdlp` itself and construct `YtDlpProvider` at startup — there's no
+free ride from `core` pulling it in for them, unlike before this seam existed.
 
 The root `Cargo.toml` is the workspace manifest and defines shared
 `[workspace.package]` values each member inherits. Cargo builds the whole
@@ -82,37 +83,43 @@ well-specified format.
 
 ## Video format/quality lookup
 
-`core::stream` wraps `downloadhub_ytdlp::YtDlp` as `StreamClient`, which
-originally wrapped `y7dl::Client` — a pure-Rust InnerTube client. That broke
-when YouTube changed its extraction internals, with no fix possible short of
-tracking YouTube's changes in our own Rust code the way `y7dl` did. `yt-dlp`
-(an external binary, not a Rust dependency) is maintained upstream
-specifically to track that churn, so `core::stream` now shells out to it via
-`downloadhub-ytdlp` (`ytdlp/`) instead — the same "external process, not a
-linked library" posture `transcode` already uses for ffmpeg.
+`core::stream` defines `StreamProvider`, an object-safe trait (boxed futures,
+mirroring `download::Transcode`) with two methods: `get_video` (metadata +
+format list) and `download` (one itag's stream to a path, with a progress
+callback). `core` never depends on a concrete implementation of it — the
+`YtDlpConfig` (binary path override + optional cookies file path) it threads
+through both methods is core-owned data, not yt-dlp's.
 
-`downloadhub_ytdlp::Video`/`Format` are plain data (no `Serialize`, since
-nothing requires it), and wouldn't be the right shape to expose over Tauri IPC
-regardless — `core::stream` maps them into `VideoDetail`/`FormatSummary` DTOs
-that derive `Serialize`, the same shape-translation `core::youtube` does for
-`VideoSummary`.
+`downloadhub-ytdlp` (`ytdlp/`) is the real implementation: `YtDlpProvider`
+wraps `YtDlp`, which shells out to an external `yt-dlp` binary — maintained
+upstream specifically to track YouTube's extraction changes, which is why this
+crate replaced `y7dl`, a pure-Rust InnerTube client that broke the moment
+YouTube changed its internals with no in-crate fix possible. `ytdlp` depends on
+`core` (for `StreamProvider`, `StreamError`, `VideoDetail`, `FormatSummary`)
+and implements the trait; `core` has no dependency on `ytdlp` at all, the same
+"external process, not a linked library" posture `transcode` already uses for
+ffmpeg — see "Cargo workspace layout" above for why this direction was chosen
+over `core` depending on `ytdlp` directly.
 
-Because yt-dlp is a subprocess spawned per call rather than a client holding
-pooled connections, `StreamClient` is now a stateless marker struct — kept
-only so `AppState.stream_client` and existing call sites didn't need to
-change shape. Every method takes a `YtDlpConfig` (binary path override +
-optional cookies file path) resolved fresh by the caller from settings on
-every call — see `core::stream::resolve_ytdlp_config` — so a changed yt-dlp
-path or updated cookies apply to the very next search or download, no restart
-needed (the same freshness rule `ffmpeg_path` and `mcp_enabled` already
-follow).
+`YtDlp::fetch_video` (in `ytdlp`) runs `yt-dlp -J --skip-download` and parses
+the JSON into private `Video`/`Format` types; formats whose `format_id` isn't
+a plain number (storyboards, `sb0`/`sb1`) are dropped during that conversion,
+since every real YouTube stream format's id is numeric — the same number the
+old itag was, so `QueueEntry::itag: u32` and the rest of the itag-based
+plumbing needed no changes. `YtDlpProvider::get_video` then maps those into
+`core`'s `VideoDetail`/`FormatSummary` DTOs (which already derive
+`Serialize`, unlike the private yt-dlp-shaped types) — the same
+shape-translation `core::youtube` does for `VideoSummary`.
 
-`YtDlp::fetch_video` runs `yt-dlp -J --skip-download` and parses the JSON
-into `Video`/`Format`; formats whose `format_id` isn't a plain number
-(storyboards, `sb0`/`sb1`) are dropped during that conversion, since every
-real YouTube stream format's id is numeric — the same number the old itag
-was, so `QueueEntry::itag: u32` and the rest of the itag-based plumbing needed
-no changes.
+`core::stream::StreamClient` is the thin business-logic layer built on top of
+the trait: it wraps whatever `Box<dyn StreamProvider>` its caller constructs
+it with (`YtDlpProvider::new()` in production; a test double in `core`'s own
+unit tests) and adds format-selection (`resolve_preferred_format`,
+`resolve_queue_format`, `FormatPreference`) on top, so call sites never touch
+`StreamProvider` directly. `AppState.stream_client` in `src-tauri` and the
+equivalent field in `mcp-server` both construct one at startup by passing a
+`YtDlpProvider`, mirroring how `AppState.resolve_transcoder` constructs a
+`Transcoder`.
 
 ### Cookies (bot-check workaround)
 
@@ -171,7 +178,7 @@ can be pasted or typed.
 ## Download execution and progress events
 
 `core::download::run_download` is the orchestrator: given a queue entry id it
-re-fetches the video via `StreamClient::fetch_video` (yt-dlp's stream
+re-fetches the video via `StreamClient::get_video_formats` (yt-dlp's stream
 resolution is itself time-limited, so a stored format list can't be reused),
 resolves the requested itag, derives the destination filename, and downloads
 the format through `StreamClient::download` — which spawns `yt-dlp -f <itag>
@@ -185,7 +192,7 @@ it runs.
 
 Progress is a plain `FnMut(DownloadProgress)` callback, not a Tauri event —
 `core` stays Tauri-agnostic. yt-dlp reports progress as its own stdout lines
-(via `--progress-template`, parsed by `downloadhub_ytdlp::download`), which
+(via `--progress-template`, parsed by `YtDlp::download` in `ytdlp`), which
 `StreamClient::download` forwards to the caller unthrottled — throttling is a
 UI concern, not something yt-dlp or the process wrapper should own.
 `core::download::runner::download_entry` wraps the callback in a `Throttle`

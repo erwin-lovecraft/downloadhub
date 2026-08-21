@@ -1,12 +1,15 @@
-//! Video format/quality lookup via `yt-dlp`.
+//! Video format/quality lookup via the [`StreamProvider`] seam — `core`
+//! decides *when* to look up formats or download a stream, never *how*.
 
 mod client;
 mod config;
 mod models;
+mod provider;
 
 pub use client::StreamClient;
 pub use config::{resolve_ytdlp_config, YtDlpConfig};
 pub use models::{FormatPreference, FormatSummary, ResolvedFormat, VideoDetail, MP3_SOURCE_ITAG};
+pub use provider::{BoxFuture, StreamProvider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
@@ -20,18 +23,4 @@ pub enum StreamError {
     YtDlpNotFound,
     #[error("yt-dlp error: {0}")]
     Other(String),
-}
-
-impl From<downloadhub_ytdlp::Error> for StreamError {
-    fn from(error: downloadhub_ytdlp::Error) -> Self {
-        match error {
-            downloadhub_ytdlp::Error::InvalidVideoId(input) => StreamError::InvalidVideoId(input),
-            downloadhub_ytdlp::Error::VideoUnavailable(reason) => {
-                StreamError::VideoUnavailable(reason)
-            }
-            downloadhub_ytdlp::Error::FormatNotFound => StreamError::FormatNotFound,
-            downloadhub_ytdlp::Error::BinaryNotFound(_) => StreamError::YtDlpNotFound,
-            other => StreamError::Other(other.to_string()),
-        }
-    }
 }

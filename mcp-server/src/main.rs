@@ -18,6 +18,7 @@ use downloadhub_core::queue::QueueStore;
 use downloadhub_core::settings;
 use downloadhub_core::stream::{FormatPreference, StreamClient};
 use downloadhub_core::youtube::YoutubeClient;
+use downloadhub_ytdlp::YtDlpProvider;
 
 const INSTRUCTIONS: &str = "Search YouTube and fill DownloadHub's download queue. \
 Adding to the queue takes effect immediately — no approval step. \
@@ -121,7 +122,7 @@ impl DownloadHub {
         })?;
         let queue_store = QueueStore::open(&downloadhub_core::paths::queue_db_path(&app_data_dir))?;
         Ok(Self {
-            stream_client: Arc::new(StreamClient::new()),
+            stream_client: Arc::new(StreamClient::new(YtDlpProvider::new())),
             queue_store: Arc::new(queue_store),
             settings_path: downloadhub_core::paths::settings_path(&app_data_dir),
             app_data_dir,

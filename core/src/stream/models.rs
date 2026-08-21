@@ -20,23 +20,6 @@ pub struct FormatSummary {
     pub has_audio: bool,
 }
 
-impl From<downloadhub_ytdlp::Format> for FormatSummary {
-    fn from(format: downloadhub_ytdlp::Format) -> Self {
-        Self {
-            itag: format.itag,
-            ext: format.ext.clone(),
-            quality_label: format.quality_label.clone(),
-            width: format.width,
-            height: format.height,
-            fps: format.fps,
-            bitrate: format.bitrate,
-            content_length_bytes: format.filesize_bytes,
-            has_video: format.is_video(),
-            has_audio: format.has_audio(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct VideoDetail {
     pub video_id: String,
@@ -47,6 +30,14 @@ pub struct VideoDetail {
     /// ascending quality) — callers needing a specific pick use
     /// `select_format`/`FormatPreference` rather than relying on order.
     pub formats: Vec<FormatSummary>,
+}
+
+impl VideoDetail {
+    /// Looks up one specific stream by itag, e.g. to re-check a queue
+    /// entry's chosen format is still offered before downloading it.
+    pub fn format_by_itag(&self, itag: u32) -> Option<&FormatSummary> {
+        self.formats.iter().find(|f| f.itag == itag)
+    }
 }
 
 /// A quality shortcut for operations that can't reasonably ask the user to
