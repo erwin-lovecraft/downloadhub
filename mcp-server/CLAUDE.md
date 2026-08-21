@@ -3,7 +3,11 @@
 A standalone binary exposing downloadhub to external AI agents over MCP/stdio.
 Depends on `downloadhub-core` so it reuses the exact same queue manager and
 persistence as the desktop app; it does **not** depend on `transcode` and links
-no ffmpeg code.
+no ffmpeg code. It does depend on `downloadhub-ytdlp` directly, alongside
+`core` — `core::stream::StreamProvider` is a trait `core` defines and `ytdlp`
+implements (see `core/CLAUDE.md`, `ytdlp/CLAUDE.md`), so this binary
+constructs a `downloadhub_ytdlp::YtDlpProvider` itself in `DownloadHub::new`
+to give its `StreamClient` something to call.
 
 Registration for Claude Desktop / Claude Code / Gemini CLI / Codex CLI is in
 [`../docs/MCP_SETUP.md`](../docs/MCP_SETUP.md).

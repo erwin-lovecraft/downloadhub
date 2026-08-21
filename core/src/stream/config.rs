@@ -9,8 +9,9 @@ use crate::settings::AppSettings;
 
 #[derive(Debug, Clone, Default)]
 pub struct YtDlpConfig {
-    /// `None` means "auto-locate" — the bundled sidecar next to the app
-    /// executable, then PATH (see `downloadhub_ytdlp::locate_ytdlp`).
+    /// `None` means "auto-locate" — left to the `StreamProvider` impl (the
+    /// bundled sidecar next to the app executable, then PATH; see
+    /// `downloadhub_ytdlp::locate_ytdlp`, the concrete provider's resolver).
     pub binary_path: Option<PathBuf>,
     /// A Netscape-format cookies file to pass via `--cookies`, written from
     /// the settings' pasted cookie text. `None` when no cookies are

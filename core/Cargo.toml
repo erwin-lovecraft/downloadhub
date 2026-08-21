@@ -3,14 +3,13 @@ name = "downloadhub-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Pure business logic for downloadhub: YouTube Data API client, yt-dlp wrapper, queue manager, download orchestrator, and persistence. No Tauri dependency."
+description = "Pure business logic for downloadhub: YouTube Data API client, stream-provider seam, queue manager, download orchestrator, and persistence. No Tauri dependency."
 
 [lib]
 name = "downloadhub_core"
 
 [dependencies]
 dirs = "6.0.0"
-downloadhub-ytdlp = { path = "../ytdlp" }
 keyring = { version = "4.1.4", features = ["v1"] }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
 reqwest = { version = "0.13.4", features = ["json", "query"] }

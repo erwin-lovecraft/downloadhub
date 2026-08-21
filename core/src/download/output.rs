@@ -2,12 +2,16 @@
 
 use std::path::PathBuf;
 
-use downloadhub_ytdlp::Format;
+use crate::stream::FormatSummary;
 
-pub(crate) fn destination_path(output_folder: &str, title: &str, format: &Format) -> PathBuf {
-    let suffix = if format.is_video() && format.has_audio() {
+pub(crate) fn destination_path(
+    output_folder: &str,
+    title: &str,
+    format: &FormatSummary,
+) -> PathBuf {
+    let suffix = if format.has_video && format.has_audio {
         ""
-    } else if format.is_video() {
+    } else if format.has_video {
         ".video"
     } else {
         ".audio"
@@ -75,8 +79,8 @@ mod tests {
         assert_eq!(sanitize_filename(&long).len(), 150);
     }
 
-    fn format(ext: &str, vcodec: Option<&str>, acodec: Option<&str>) -> Format {
-        Format {
+    fn format(ext: &str, has_video: bool, has_audio: bool) -> FormatSummary {
+        FormatSummary {
             itag: 0,
             ext: ext.to_string(),
             quality_label: None,
@@ -84,29 +88,29 @@ mod tests {
             height: None,
             fps: None,
             bitrate: None,
-            filesize_bytes: None,
-            vcodec: vcodec.map(str::to_string),
-            acodec: acodec.map(str::to_string),
+            content_length_bytes: None,
+            has_video,
+            has_audio,
         }
     }
 
     #[test]
     fn destination_path_is_bare_for_progressive_formats() {
-        let f = format("mp4", Some("avc1"), Some("mp4a.40.2"));
+        let f = format("mp4", true, true);
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.mp4"));
     }
 
     #[test]
     fn destination_path_labels_video_only_formats() {
-        let f = format("webm", Some("vp9"), Some("none"));
+        let f = format("webm", true, false);
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.video.webm"));
     }
 
     #[test]
     fn destination_path_labels_audio_only_formats() {
-        let f = format("m4a", Some("none"), Some("mp4a.40.2"));
+        let f = format("m4a", false, true);
         let path = destination_path("C:/out", "My Title", &f);
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.audio.m4a"));
     }

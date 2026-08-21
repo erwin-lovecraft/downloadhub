@@ -162,17 +162,17 @@ async fn download_entry(
 ) -> Result<DownloadProgress, DownloadError> {
     let video = ctx
         .stream_client
-        .fetch_video(&entry.video_id, ctx.ytdlp_config)
+        .get_video_formats(&entry.video_id, ctx.ytdlp_config)
         .await?;
     let format = video
         .format_by_itag(entry.itag)
         .ok_or(DownloadError::FormatNotFound(entry.itag))?;
-    let total_bytes = format.filesize_bytes.unwrap_or(0);
+    let total_bytes = format.content_length_bytes.unwrap_or(0);
 
     // Validate the conversion prerequisites up front so a doomed entry
     // fails before spending bandwidth on the download.
     let transcoder = if entry.convert_to_mp3 {
-        if format.is_video() {
+        if format.has_video {
             return Err(DownloadError::NotAudioOnly(entry.itag));
         }
         Some(ctx.transcoder.ok_or(DownloadError::TranscoderUnavailable)?)
@@ -233,7 +233,33 @@ async fn download_entry(
 mod tests {
     use super::*;
     use crate::queue::{NewQueueEntry, QueueStore};
-    use crate::stream::{StreamClient, YtDlpConfig};
+    use crate::stream::{BoxFuture, StreamClient, StreamError, StreamProvider, VideoDetail};
+
+    /// Never actually invoked by the tests below (they exercise the
+    /// cancel-before-start path), but `StreamClient::new` needs some
+    /// `StreamProvider` to wrap.
+    struct UnusedProvider;
+
+    impl StreamProvider for UnusedProvider {
+        fn get_video<'a>(
+            &'a self,
+            _url_or_id: &'a str,
+            _config: &'a YtDlpConfig,
+        ) -> BoxFuture<'a, Result<VideoDetail, StreamError>> {
+            Box::pin(async { unreachable!("test never calls the stream provider") })
+        }
+
+        fn download<'a>(
+            &'a self,
+            _url_or_id: &'a str,
+            _itag: u32,
+            _dest: &'a std::path::Path,
+            _config: &'a YtDlpConfig,
+            _on_progress: &'a mut (dyn FnMut(u64, u64) + Send + 'a),
+        ) -> BoxFuture<'a, Result<u64, StreamError>> {
+            Box::pin(async { unreachable!("test never calls the stream provider") })
+        }
+    }
 
     fn new_entry(video_id: &str) -> NewQueueEntry {
         NewQueueEntry {
@@ -254,7 +280,7 @@ mod tests {
 
         let ytdlp_config = YtDlpConfig::default();
         let ctx = DownloadContext {
-            stream_client: &StreamClient::new(),
+            stream_client: &StreamClient::new(UnusedProvider),
             store: &store,
             ytdlp_config: &ytdlp_config,
             transcoder: None,
@@ -282,7 +308,7 @@ mod tests {
         let store = QueueStore::open_in_memory().unwrap();
         let ytdlp_config = YtDlpConfig::default();
         let ctx = DownloadContext {
-            stream_client: &StreamClient::new(),
+            stream_client: &StreamClient::new(UnusedProvider),
             store: &store,
             ytdlp_config: &ytdlp_config,
             transcoder: None,

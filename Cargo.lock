@@ -939,6 +939,7 @@ dependencies = [
  "dotenvy",
  "downloadhub-core",
  "downloadhub-transcode",
+ "downloadhub-ytdlp",
  "serde",
  "serde_json",
  "tauri",
@@ -954,7 +955,6 @@ name = "downloadhub-core"
 version = "1.1.0"
 dependencies = [
  "dirs",
- "downloadhub-ytdlp",
  "keyring",
  "oauth2",
  "reqwest 0.13.4",
@@ -974,6 +974,7 @@ dependencies = [
  "anyhow",
  "dotenvy",
  "downloadhub-core",
+ "downloadhub-ytdlp",
  "rmcp",
  "schemars 1.2.1",
  "serde",
@@ -994,6 +995,7 @@ dependencies = [
 name = "downloadhub-ytdlp"
 version = "1.1.0"
 dependencies = [
+ "downloadhub-core",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

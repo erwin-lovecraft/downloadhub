@@ -24,6 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 downloadhub-core = { path = "../core" }
 downloadhub-transcode = { path = "../transcode" }
+downloadhub-ytdlp = { path = "../ytdlp" }
 dotenvy = "0.15.7"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-updater = "2.10.1"

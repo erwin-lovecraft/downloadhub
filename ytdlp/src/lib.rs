@@ -8,6 +8,10 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
+mod provider;
+
+pub use provider::YtDlpProvider;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid video id or url: {0}")]
