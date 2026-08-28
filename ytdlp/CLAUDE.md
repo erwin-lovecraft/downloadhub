@@ -47,6 +47,14 @@ exchange.
 - `download` runs `yt-dlp -f <itag> -o <dest>` and parses `--progress-template`
   output lines for byte counts, calling back unthrottled — `core::download`
   owns the throttling policy, this crate just reports what yt-dlp says.
+- yt-dlp's stdout is read as **bytes**, split on `\n`, and decoded lossily
+  (`decode_line`) rather than through `BufRead::lines()`. yt-dlp is Python and
+  encodes its output with the locale code page when stdout is a pipe, so on a
+  non-UTF-8 Windows (cp1258, cp1252, cp932...) the `[download] Destination:
+  <title>` line is not valid UTF-8 and a strict reader aborts the download
+  mid-flight. `command()` also sets `PYTHONIOENCODING=utf-8`/`PYTHONUTF8=1` so
+  the bytes usually *are* UTF-8; the lossy read is the backstop for builds that
+  ignore them. The progress numbers we actually parse are pure ASCII either way.
 - `locate_ytdlp()` mirrors `downloadhub_transcode::locate_ffmpeg()`: next to
   the current executable (where Tauri stages the sidecar), then PATH.
 - `YtDlpProvider` (`src/provider.rs`) is the `StreamProvider` impl: it resolves
