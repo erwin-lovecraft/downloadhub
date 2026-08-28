@@ -174,6 +174,12 @@ impl YtDlp {
             cmd.arg("--cookies").arg(cookies);
         }
         cmd.arg("--no-warnings").arg("--no-playlist");
+        // yt-dlp is Python: with stdout on a pipe it encodes output using the
+        // *locale* code page, which on a non-English Windows (cp1252, cp1258,
+        // cp932...) is not UTF-8. Ask for UTF-8 explicitly so lines carrying a
+        // video title stay decodable. Reading is lossy regardless, since an
+        // older yt-dlp build may ignore these.
+        cmd.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
         cmd.stdin(Stdio::null());
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flash
@@ -241,14 +247,20 @@ impl YtDlp {
         let mut stderr = child.stderr.take().expect("stderr was piped");
 
         let stderr_task = tokio::spawn(async move {
-            let mut buf = String::new();
-            let _ = stderr.read_to_string(&mut buf).await;
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf).await;
             buf
         });
 
-        let mut lines = BufReader::new(stdout).lines();
+        let mut reader = BufReader::new(stdout);
+        let mut raw = Vec::new();
         let mut last_downloaded = 0u64;
-        while let Some(line) = lines.next_line().await? {
+        loop {
+            raw.clear();
+            if reader.read_until(b'\n', &mut raw).await? == 0 {
+                break;
+            }
+            let line = decode_line(&raw);
             if let Some((downloaded, total)) = parse_progress_line(&line) {
                 last_downloaded = downloaded;
                 on_progress(downloaded, total);
@@ -256,13 +268,26 @@ impl YtDlp {
         }
 
         let status = child.wait().await?;
-        let stderr_text = stderr_task.await.unwrap_or_default();
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
 
         if !status.success() {
-            return Err(classify_error(stderr_text.as_bytes()));
+            return Err(classify_error(&stderr_bytes));
         }
         Ok(last_downloaded)
     }
+}
+
+/// Decodes one raw output line, stripping the trailing newline. Bytes that
+/// aren't valid UTF-8 become U+FFFD rather than an error: yt-dlp echoes the
+/// destination filename (i.e. the video title) on stdout, and on a Windows
+/// whose code page isn't UTF-8 those bytes would otherwise abort the read
+/// mid-download — the progress numbers we actually parse are pure ASCII.
+fn decode_line(raw: &[u8]) -> String {
+    let end = raw
+        .iter()
+        .rposition(|b| *b != b'\n' && *b != b'\r')
+        .map_or(0, |i| i + 1);
+    String::from_utf8_lossy(&raw[..end]).into_owned()
 }
 
 fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
@@ -358,6 +383,31 @@ mod tests {
     fn normalize_target_rejects_garbage() {
         assert!(normalize_target("not a video").is_err());
         assert!(normalize_target("short").is_err());
+    }
+
+    #[test]
+    fn decode_line_strips_the_line_terminator() {
+        assert_eq!(decode_line(b"download:1 2\r\n"), "download:1 2");
+        assert_eq!(decode_line(b"download:1 2\n"), "download:1 2");
+        assert_eq!(decode_line(b"download:1 2"), "download:1 2");
+        assert_eq!(decode_line(b"\n"), "");
+    }
+
+    #[test]
+    fn decode_line_survives_non_utf8_bytes() {
+        // "[download] Destination: Nh\xe1c.m4a" as Windows cp1258 would emit
+        // it: the 0xe1 byte is not valid UTF-8 on its own.
+        let raw = b"[download] Destination: Nh\xe1c.m4a\n";
+        assert!(decode_line(raw).starts_with("[download] Destination: Nh"));
+    }
+
+    #[test]
+    fn parse_progress_line_survives_a_mojibake_prefix() {
+        // A garbled line must simply not parse, never abort the read loop.
+        assert_eq!(
+            parse_progress_line(&decode_line(b"[info] \xff\xfe\n")),
+            None
+        );
     }
 
     #[test]
