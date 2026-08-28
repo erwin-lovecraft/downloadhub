@@ -12,7 +12,7 @@ Rationale for the decisions below lives in
 | Module | Responsibility |
 | --- | --- |
 | `youtube` | YouTube Data API v3 client: `search.list`, `videos.list`, `playlistItems.list`. Direct `reqwest` + `serde`, not the generated crate. |
-| `stream` | The `StreamProvider` trait (the yt-dlp seam), `StreamClient` (format selection built on top of it), format DTOs, and `FormatPreference` selection. No concrete yt-dlp dependency — see `../ytdlp/CLAUDE.md`. |
+| `stream` | The `StreamProvider` trait (the yt-dlp seam), `StreamClient` (format selection built on top of it), format DTOs, `FormatPreference` selection, and `FormatRequest`/`FormatFallback` (how far a download may deviate from the itag it was given). No concrete yt-dlp dependency — see `../ytdlp/CLAUDE.md`. |
 | `queue` | SQLite-backed download queue: entry types, schema, SQL, async store. |
 | `enqueue` | Bulk add / re-format driven by a `FormatPreference` rather than an itag. |
 | `download` | Download orchestration, progress reporting, output naming, the `Transcode` seam. |
@@ -43,6 +43,13 @@ Keep it that way when adding files.
 
 - **No Tauri.** Progress and other callbacks are plain `FnMut`, so the caller
   decides whether they become Tauri events, channel sends, or test spies.
+- **`FormatPreference::Mp3` never fails for want of a format.** It degrades —
+  itag 140, any audio-only stream, the cheapest muxed one, then `AUTO_AUDIO_ITAG`
+  (the provider picks at download time) — because ffmpeg's `-vn` makes the source
+  stream an implementation detail. The other preferences keep failing loudly:
+  substituting a quality the user picked would be wrong. See
+  `../docs/ARCHITECTURE.md`, "Why an MP3 request never fails for want of a
+  format".
 - **No concrete transcoder.** `download::Transcode` is an object-safe trait;
   `core` decides *when* post-processing runs, never *how*. Errors cross the seam
   as a boxed `BoxError` that `core` only displays.

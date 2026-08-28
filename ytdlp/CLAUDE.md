@@ -41,12 +41,27 @@ exchange.
   private `Video`/`Format` types. Formats whose `format_id` doesn't parse as a
   plain `u32` (storyboards, `sb0`/`sb1`) are dropped during conversion —
   YouTube's real stream formats all have a numeric id, which not coincidentally
-  is the same number the old itag was. `YtDlpProvider::get_video` maps these
-  into `core`'s `VideoDetail`/`FormatSummary` DTOs, which is the only place
-  this crate's types cross into `core`'s.
-- `download` runs `yt-dlp -f <itag> -o <dest>` and parses `--progress-template`
-  output lines for byte counts, calling back unthrottled — `core::download`
-  owns the throttling policy, this crate just reports what yt-dlp says.
+  is the same number the old itag was. Any source that numbers its formats
+  differently therefore arrives in `core` with an *empty* list, which is why an
+  MP3 request falls back to letting yt-dlp pick (`core::stream::AUTO_AUDIO_ITAG`)
+  rather than erroring. `YtDlpProvider::get_video` maps these into `core`'s
+  `VideoDetail`/`FormatSummary` DTOs, which is the only place this crate's types
+  cross into `core`'s.
+- `Format::has_audio` reads an **unset** `acodec` as audio unless the format is
+  known to be video. yt-dlp leaves both codecs unset on formats it hasn't probed
+  — YouTube's HLS audio itags 233/234, and every format of a live stream — and
+  reading that as "no audio" made those videos look like they had none.
+- `download` runs `yt-dlp -f <selector> -o <dest>` and parses
+  `--progress-template` output lines for byte counts, calling back unthrottled —
+  `core::download` owns the throttling policy, this crate just reports what
+  yt-dlp says. The selector comes from `format_selector` (`src/provider.rs`),
+  the only place `core`'s semantic `FormatRequest`/`FormatFallback` becomes
+  yt-dlp syntax: a bare itag, or a `/`-separated fallback chain for an MP3
+  entry, which yt-dlp resolves left to right.
+- The progress template carries its own literal marker (`PROGRESS_MARKER`)
+  because yt-dlp consumes the `download:` prefix as the template's *type*
+  selector — it never reaches stdout, so it can't be what `parse_progress_line`
+  matches on.
 - yt-dlp's stdout is read as **bytes**, split on `\n`, and decoded lossily
   (`decode_line`) rather than through `BufRead::lines()`. yt-dlp is Python and
   encodes its output with the locale code page when stdout is a pipe, so on a

@@ -5,7 +5,8 @@
 use std::path::Path;
 
 use downloadhub_core::stream::{
-    BoxFuture, FormatSummary, StreamError, StreamProvider, VideoDetail, YtDlpConfig,
+    BoxFuture, FormatFallback, FormatRequest, FormatSummary, StreamError, StreamProvider,
+    VideoDetail, YtDlpConfig, AUTO_AUDIO_ITAG,
 };
 
 use crate::{locate_ytdlp, Error, Format, YtDlp};
@@ -54,7 +55,7 @@ impl StreamProvider for YtDlpProvider {
     fn download<'a>(
         &'a self,
         url_or_id: &'a str,
-        itag: u32,
+        request: FormatRequest,
         dest: &'a Path,
         config: &'a YtDlpConfig,
         on_progress: &'a mut (dyn FnMut(u64, u64) + Send + 'a),
@@ -62,10 +63,33 @@ impl StreamProvider for YtDlpProvider {
         Box::pin(async move {
             let ytdlp = Self::resolve(config)?;
             ytdlp
-                .download(url_or_id, &itag.to_string(), dest, on_progress)
+                .download(url_or_id, &format_selector(request), dest, on_progress)
                 .await
                 .map_err(map_error)
         })
+    }
+}
+
+/// Translates a [`FormatRequest`] into a yt-dlp `-f` selector — the one
+/// place `core`'s semantic "any stream with audio will do" becomes yt-dlp
+/// syntax. yt-dlp resolves a `/`-separated chain left to right, taking the
+/// first alternative a video actually offers, so an [`FormatFallback::AnyAudio`]
+/// request degrades from the recorded itag through the best audio-only
+/// stream (`bestaudio`) and the best stream that merely *contains* audio
+/// (`bestaudio*`, which allows video the transcode then discards) to
+/// whatever `best` resolves to. That last pair is what makes an MP3 work
+/// from a source with no separate audio track at all, and from one whose
+/// format ids `core` can't represent, where the recorded itag is
+/// [`AUTO_AUDIO_ITAG`] and gets left out of the chain entirely.
+fn format_selector(request: FormatRequest) -> String {
+    let itag = (request.itag != AUTO_AUDIO_ITAG).then(|| request.itag.to_string());
+    match request.fallback {
+        FormatFallback::Exact => itag.unwrap_or_else(|| "best".to_string()),
+        FormatFallback::AnyAudio => itag
+            .into_iter()
+            .chain(["bestaudio", "bestaudio*", "best"].map(str::to_string))
+            .collect::<Vec<_>>()
+            .join("/"),
     }
 }
 
@@ -93,5 +117,31 @@ fn map_error(error: Error) -> StreamError {
         Error::FormatNotFound => StreamError::FormatNotFound,
         Error::BinaryNotFound(_) => StreamError::YtDlpNotFound,
         other => StreamError::Other(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_exact_request_selects_only_that_itag() {
+        assert_eq!(format_selector(FormatRequest::exact(137)), "137");
+    }
+
+    #[test]
+    fn an_any_audio_request_falls_back_past_its_itag() {
+        assert_eq!(
+            format_selector(FormatRequest::any_audio(140)),
+            "140/bestaudio/bestaudio*/best"
+        );
+    }
+
+    #[test]
+    fn an_auto_itag_leaves_the_pick_entirely_to_yt_dlp() {
+        assert_eq!(
+            format_selector(FormatRequest::any_audio(AUTO_AUDIO_ITAG)),
+            "bestaudio/bestaudio*/best"
+        );
     }
 }

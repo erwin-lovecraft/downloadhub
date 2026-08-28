@@ -7,7 +7,7 @@ use std::path::Path;
 use std::pin::Pin;
 
 use super::config::YtDlpConfig;
-use super::models::VideoDetail;
+use super::models::{FormatRequest, VideoDetail};
 use super::StreamError;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -26,14 +26,16 @@ pub trait StreamProvider: Send + Sync {
         config: &'a YtDlpConfig,
     ) -> BoxFuture<'a, Result<VideoDetail, StreamError>>;
 
-    /// Downloads `itag`'s stream for `url_or_id` to the exact path `dest`.
-    /// `on_progress` receives raw `(downloaded_bytes, total_bytes)` calls,
-    /// unthrottled — the caller decides how often to forward them. Returns
-    /// the number of bytes written.
+    /// Downloads `request`'s stream for `url_or_id` to the exact path
+    /// `dest`, honouring the request's [`FormatFallback`](super::FormatFallback)
+    /// when the exact itag isn't on offer. `on_progress` receives raw
+    /// `(downloaded_bytes, total_bytes)` calls, unthrottled — the caller
+    /// decides how often to forward them. Returns the number of bytes
+    /// written.
     fn download<'a>(
         &'a self,
         url_or_id: &'a str,
-        itag: u32,
+        request: FormatRequest,
         dest: &'a Path,
         config: &'a YtDlpConfig,
         on_progress: &'a mut (dyn FnMut(u64, u64) + Send + 'a),

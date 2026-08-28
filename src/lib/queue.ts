@@ -16,6 +16,22 @@ export interface QueueEntry {
   created_at: number;
 }
 
+/**
+ * Stand-in itag on an MP3 entry whose source stream yt-dlp picks at download
+ * time, because nothing in the video's format list matched (mirrors
+ * `core::stream::AUTO_AUDIO_ITAG`). Not a real itag, so it isn't worth
+ * showing the user a number for.
+ */
+export const AUTO_AUDIO_ITAG = 0;
+
+/** What an entry's format line reads as. */
+export function formatDescription(entry: QueueEntry): string {
+  const source = entry.itag === AUTO_AUDIO_ITAG ? "best audio" : `itag ${entry.itag}`;
+  return entry.convert_to_mp3
+    ? `mp3 (from ${source})`
+    : `${entry.quality_label ?? "audio"} (${source})`;
+}
+
 export interface AddToQueueParams {
   videoId: string;
   title: string;

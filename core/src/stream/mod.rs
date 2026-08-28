@@ -8,7 +8,11 @@ mod provider;
 
 pub use client::StreamClient;
 pub use config::{resolve_ytdlp_config, YtDlpConfig};
-pub use models::{FormatPreference, FormatSummary, ResolvedFormat, VideoDetail, MP3_SOURCE_ITAG};
+pub(crate) use models::select_format;
+pub use models::{
+    FormatFallback, FormatPreference, FormatRequest, FormatSummary, ResolvedFormat, VideoDetail,
+    AUTO_AUDIO_ITAG, MP3_SOURCE_ITAG,
+};
 pub use provider::{BoxFuture, StreamProvider};
 
 #[derive(Debug, thiserror::Error)]
