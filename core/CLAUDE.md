@@ -37,7 +37,7 @@ Keep it that way when adding files.
   `duration` (ISO 8601)
 - `stream/` → `provider` (`StreamProvider` trait), `client` (`StreamClient`,
   format selection), `models`, `config` (`YtDlpConfig` resolution from
-  settings)
+  settings), `cookies` (cookies.txt inspection)
 
 ## Rules specific to this crate
 
@@ -71,9 +71,13 @@ Keep it that way when adding files.
 - **No `unwrap()`/`panic!` on I/O or network paths.** Return `Result`.
 - **yt-dlp/ffmpeg config is resolved fresh per call, never cached** — see
   `stream::resolve_ytdlp_config` and `settings::AppSettings`'s `ytdlp_path`/
-  `ytdlp_cookies`/`ffmpeg_path` fields. A settings change (new binary path,
-  updated cookies) must apply to the very next call, matching `mcp_enabled`'s
-  existing per-call re-read.
+  `ytdlp_cookies_path`/`ffmpeg_path` fields. A settings change (new binary
+  path, a different cookies file) must apply to the very next call, matching
+  `mcp_enabled`'s existing per-call re-read.
+- **The cookies file belongs to the user, not to us.** Store its path and pass
+  it through; never copy the cookie text into a file we own. yt-dlp rewrites
+  that file after every run to persist the cookies YouTube rotated, so a copy
+  goes stale — see `../docs/ARCHITECTURE.md`, "Cookies (bot-check workaround)".
 
 ## Testing
 

@@ -27,8 +27,10 @@ pub fn settings_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("settings.json")
 }
 
-/// Where the yt-dlp cookies file (written from the settings' pasted cookie
-/// text) lives inside [`app_data_dir`].
+/// Where a settings file that still held pasted cookie *text* has that text
+/// migrated to, inside [`app_data_dir`] — see
+/// `settings::migrate_pasted_cookies`. Cookies configured since then are the
+/// user's own file, wherever they keep it, and never live here.
 pub fn cookies_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("cookies.txt")
 }

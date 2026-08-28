@@ -127,21 +127,16 @@ impl AppState {
     }
 
     /// Resolves yt-dlp's binary path override and cookies file, re-read on
-    /// every search/download so a settings change (a new binary path,
-    /// updated cookies) applies without restarting. Falls back to
+    /// every search/download so a settings change (a new binary path, a
+    /// different cookies file) applies without restarting. Falls back to
     /// `YtDlpConfig::default()` — auto-locate the binary, no cookies — if
     /// settings can't be read at all (e.g. no writable app data directory).
     pub async fn resolve_ytdlp_config(&self) -> downloadhub_core::stream::YtDlpConfig {
         let Some(settings_path) = self.settings_path.as_deref() else {
             return downloadhub_core::stream::YtDlpConfig::default();
         };
-        let Some(app_data_dir) = settings_path.parent() else {
-            return downloadhub_core::stream::YtDlpConfig::default();
-        };
         match downloadhub_core::settings::load(settings_path).await {
-            Ok(settings) => {
-                downloadhub_core::stream::resolve_ytdlp_config(app_data_dir, &settings).await
-            }
+            Ok(settings) => downloadhub_core::stream::resolve_ytdlp_config(&settings),
             Err(_) => downloadhub_core::stream::YtDlpConfig::default(),
         }
     }

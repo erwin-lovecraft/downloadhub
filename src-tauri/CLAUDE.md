@@ -15,7 +15,7 @@ CLI hardcodes that folder when resolving `tauri.conf.json`.
 - `main.rs` — binary entry point.
 - `state.rs` — `AppState`: everything the app holds for its lifetime.
 - `commands/` — one module per surface: `youtube`, `video`, `queue`,
-  `download`, `playlist`, `settings`, `mcp`.
+  `download`, `playlist`, `settings`, `cookies`, `mcp`.
 
 ## Commands
 
@@ -27,6 +27,7 @@ CLI hardcodes that folder when resolving `tauri.conf.json`.
 | `download` | `start_download`, `cancel_download`, `download_all`, `stop_download_all` |
 | `playlist` | `import_playlist_to_queue` |
 | `settings` | `get_settings`, `save_settings` |
+| `cookies` | `check_ytdlp_cookies` |
 | `mcp` | `mcp_server_path` |
 
 Queue command names deliberately match the MCP tool names so both surfaces
@@ -55,7 +56,7 @@ Two invariants worth preserving:
   all call `ensure_no_batch_running` first, because `download_all` bypasses the
   handle registry and a per-entry command racing it has no safe outcome.
 - `resolve_transcoder` and `resolve_ytdlp_config` both run **per call**, not
-  once at startup, so changing the ffmpeg path, yt-dlp path, or yt-dlp cookies
+  once at startup, so changing the ffmpeg path, yt-dlp path, or cookies file
   in settings takes effect without a restart.
 
 ## Events
