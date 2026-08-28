@@ -4,24 +4,23 @@ use std::path::PathBuf;
 
 use crate::stream::FormatSummary;
 
+/// `format` is `None` only for an MP3 entry whose source stream the provider
+/// picks at download time (see `stream::AUTO_AUDIO_ITAG`): the container
+/// isn't known ahead of time, so the file gets `ytdlp`'s own unknown-format
+/// extension. It's transient either way — the transcode deletes it.
 pub(crate) fn destination_path(
     output_folder: &str,
     title: &str,
-    format: &FormatSummary,
+    format: Option<&FormatSummary>,
 ) -> PathBuf {
-    let suffix = if format.has_video && format.has_audio {
-        ""
-    } else if format.has_video {
-        ".video"
-    } else {
-        ".audio"
+    let (suffix, ext) = match format {
+        Some(f) if f.has_video && f.has_audio => ("", f.ext.as_str()),
+        Some(f) if f.has_video => (".video", f.ext.as_str()),
+        Some(f) => (".audio", f.ext.as_str()),
+        None => (".audio", "bin"),
     };
     let mut path = PathBuf::from(output_folder);
-    path.push(format!(
-        "{}{suffix}.{}",
-        sanitize_filename(title),
-        format.ext
-    ));
+    path.push(format!("{}{suffix}.{ext}", sanitize_filename(title)));
     path
 }
 
@@ -97,22 +96,28 @@ mod tests {
     #[test]
     fn destination_path_is_bare_for_progressive_formats() {
         let f = format("mp4", true, true);
-        let path = destination_path("C:/out", "My Title", &f);
+        let path = destination_path("C:/out", "My Title", Some(&f));
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.mp4"));
     }
 
     #[test]
     fn destination_path_labels_video_only_formats() {
         let f = format("webm", true, false);
-        let path = destination_path("C:/out", "My Title", &f);
+        let path = destination_path("C:/out", "My Title", Some(&f));
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.video.webm"));
     }
 
     #[test]
     fn destination_path_labels_audio_only_formats() {
         let f = format("m4a", false, true);
-        let path = destination_path("C:/out", "My Title", &f);
+        let path = destination_path("C:/out", "My Title", Some(&f));
         assert_eq!(path, PathBuf::from("C:/out").join("My Title.audio.m4a"));
+    }
+
+    #[test]
+    fn destination_path_falls_back_when_the_format_is_unknown() {
+        let path = destination_path("C:/out", "My Title", None);
+        assert_eq!(path, PathBuf::from("C:/out").join("My Title.audio.bin"));
     }
 
     #[test]

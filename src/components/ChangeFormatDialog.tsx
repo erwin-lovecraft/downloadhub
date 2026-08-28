@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatBytes } from "@/lib/format";
 import type { FormatSummary } from "@/lib/video";
-import type { QueueEntry } from "@/lib/queue";
+import { formatDescription, type QueueEntry } from "@/lib/queue";
 
 function formatLabel(format: FormatSummary): string {
   return format.quality_label ?? "audio";
@@ -57,11 +57,9 @@ export function ChangeFormatDialog({
           <DialogTitle>Change format</DialogTitle>
           <DialogDescription>
             {entry
-              ? `"${entry.title}" — currently ${
-                  entry.convert_to_mp3
-                    ? `mp3 (from itag ${entry.itag})`
-                    : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`
-                }. Picking a format re-queues the entry.`
+              ? `"${entry.title}" — currently ${formatDescription(
+                  entry,
+                )}. Picking a format re-queues the entry.`
               : ""}
           </DialogDescription>
         </DialogHeader>

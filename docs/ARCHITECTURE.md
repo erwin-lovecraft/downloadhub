@@ -413,6 +413,41 @@ HE-AAC) deliberately: MP3 conversion is a lossy-to-lossy transcode, so it
 should start from the best universally available source rather than compounding
 139's low bitrate.
 
+### Why an MP3 request never fails for want of a format
+
+itag 140 is *usual*, not guaranteed, and the alternatives thin out fast: a live
+stream or an extraction that only yielded an HLS manifest offers no separate
+audio track at all, and yt-dlp leaves `acodec` **unset** on the HLS audio itags
+(233/234) rather than naming a codec. Requiring a strictly audio-only format
+with a known codec turned all of that into a flat "no format matched the
+requested filter" at enqueue time — for a conversion that would have worked
+fine, since ffmpeg's `-vn` discards any video track the source carries.
+
+So MP3 is the one preference allowed to degrade, in four tiers:
+
+1. `select_format` (`core::stream::models`) prefers itag 140, then any other
+   audio-only stream, then the **cheapest muxed** one — smallest rather than
+   best, since its video is downloaded only to be thrown away. An unknown
+   `acodec` counts as audio unless the format is known to be video
+   (`downloadhub_ytdlp::Format::has_audio`), which is yt-dlp's own rule for
+   calling a format "audio only".
+2. With nothing at all to point at — the shape a source whose format ids aren't
+   numeric takes by the time it reaches `core`, since those are dropped in
+   conversion — the entry records `AUTO_AUDIO_ITAG` (0, not a real itag) and the
+   pick is left to download time.
+3. At download time `run_download` re-selects for an MP3 entry whose recorded
+   itag the video no longer offers, rather than failing `FormatNotFound` the way
+   an entry at a user-chosen quality still does.
+4. The download itself goes out as `FormatRequest::any_audio`, which
+   `YtDlpProvider` renders as the selector chain
+   `<itag>/bestaudio/bestaudio*/best` — yt-dlp resolves it left to right, so
+   even a format list that shifted between enqueue and download resolves to
+   *something* with audio.
+
+Tiers 3 and 4 are deliberately not extended to `BestProgressive`/
+`BestAudioOnly`: substituting a quality the user explicitly picked would be
+wrong, whereas an MP3's source stream doesn't survive the transcode at all.
+
 The transcode lives in the `transcode/` crate: a thin `tokio::process` wrapper
 around `ffmpeg -i in.m4a -vn -codec:a libmp3lame -q:a 2 out.mp3` (LAME VBR ~190
 kbps — transparent for a 128 kbps AAC source without wasting space on a fixed
@@ -448,9 +483,10 @@ ffmpeg writes `<title>.mp3`, and the m4a is deleted only after a successful
 transcode — on failure the entry goes `Failed` with ffmpeg's stderr and the m4a
 is kept, so downloaded data isn't lost. Because it's part of `run_download`,
 "Download all" finishes each entry completely (download → transcode → delete)
-before starting the next. Prerequisites (audio-only format, ffmpeg present) are
-validated *before* the download starts, so a doomed entry fails without
-spending bandwidth.
+before starting the next. The one prerequisite left to validate (ffmpeg being
+present) is checked *before* the download starts, so a doomed entry fails
+without spending bandwidth; the source stream itself needs no validating, since
+ffmpeg drops any video track it carries.
 
 `run_download`/`run_all_queued` take a `DownloadContext` struct (stream client +
 store + optional transcoder) rather than a growing positional parameter list.
@@ -610,9 +646,9 @@ secrecy.
 
 ## Muxing extension point
 
-`core::download` always requests one plain itag/`format_id` (never a
-yt-dlp `video+audio` merge expression), so a video-only or audio-only format
-is saved to its own clearly-labeled file (`<title>.video.<ext>` /
+`core::download` always requests one plain itag/`format_id`, or a `/`-separated
+fallback chain of them (never a yt-dlp `video+audio` merge expression), so a
+video-only or audio-only format is saved to its own clearly-labeled file (`<title>.video.<ext>` /
 `<title>.audio.<ext>`); a progressive format is saved as `<title>.<ext>`.
 `core::download::output` owns this naming. yt-dlp *can* merge separate
 video/audio formats into one file via ffmpeg (`-f bestvideo+bestaudio

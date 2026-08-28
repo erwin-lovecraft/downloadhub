@@ -55,9 +55,13 @@ pub enum FormatPreference {
     BestProgressive,
     /// Highest-bitrate audio-only format, kept in its original container.
     BestAudioOnly,
-    /// Audio-only, transcoded to MP3 after download (`convert_to_mp3`).
-    /// Selects [`MP3_SOURCE_ITAG`] when offered, since the conversion is
-    /// lossy-to-lossy and wants the best universal source.
+    /// Audio, transcoded to MP3 after download (`convert_to_mp3`). Selects
+    /// [`MP3_SOURCE_ITAG`] when offered, since the conversion is
+    /// lossy-to-lossy and wants the best universal source, then degrades
+    /// through any other audio-only stream to the cheapest muxed one — see
+    /// `mp3_source`. Unlike the other two preferences it is never allowed
+    /// to fail for want of a matching format: the fallback of last resort
+    /// is [`AUTO_AUDIO_ITAG`], leaving the pick to the provider.
     Mp3,
 }
 
@@ -74,6 +78,53 @@ impl FormatPreference {
 /// itag 139 (~48 kbps HE-AAC), whose low quality would compound with the
 /// lossy-to-lossy conversion.
 pub const MP3_SOURCE_ITAG: u32 = 140;
+
+/// Stand-in itag on an MP3 queue entry whose source stream is left for the
+/// provider to pick at download time. Not a real itag (YouTube's start at
+/// 5): it means "any stream with audio", the fallback for sources whose
+/// format list this crate can't represent — non-numeric format ids, or a
+/// list that arrived empty. See [`FormatFallback::AnyAudio`].
+pub const AUTO_AUDIO_ITAG: u32 = 0;
+
+/// What to ask a [`StreamProvider`](super::StreamProvider) to download: the
+/// exact stream a queue entry recorded, plus how far the provider may
+/// deviate when that stream isn't on offer. Keeping the deviation semantic
+/// (rather than passing a yt-dlp selector string) leaves *how* to fall back
+/// to the provider, the same way the rest of this seam works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatRequest {
+    pub itag: u32,
+    pub fallback: FormatFallback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FormatFallback {
+    /// Download that exact itag or fail. What a user who picked a specific
+    /// quality asked for — quietly substituting another one would not be.
+    #[default]
+    Exact,
+    /// Any stream carrying audio will do. Only for entries headed into the
+    /// MP3 transcode, where the source stream is an implementation detail:
+    /// ffmpeg re-encodes it and drops any video track (`-vn`), so which one
+    /// it was doesn't survive into the file the user asked for.
+    AnyAudio,
+}
+
+impl FormatRequest {
+    pub fn exact(itag: u32) -> Self {
+        Self {
+            itag,
+            fallback: FormatFallback::Exact,
+        }
+    }
+
+    pub fn any_audio(itag: u32) -> Self {
+        Self {
+            itag,
+            fallback: FormatFallback::AnyAudio,
+        }
+    }
+}
 
 /// What a [`FormatPreference`] resolved to for one specific video: the
 /// exact itag to fetch plus the queue-row fields that go with it.
@@ -97,13 +148,7 @@ pub(crate) fn select_format(
             .filter(|f| f.has_video && f.has_audio)
             .max_by_key(|f| f.height.unwrap_or(0)),
         FormatPreference::BestAudioOnly => best_audio_only(formats),
-        // Prefer the known-good transcode source, but don't fail the whole
-        // request when a video doesn't offer it — any audio-only stream
-        // converts to MP3 just as well, only from a different source.
-        FormatPreference::Mp3 => formats
-            .iter()
-            .find(|f| f.itag == MP3_SOURCE_ITAG && f.has_audio && !f.has_video)
-            .or_else(|| best_audio_only(formats)),
+        FormatPreference::Mp3 => mp3_source(formats),
     }
 }
 
@@ -112,6 +157,29 @@ fn best_audio_only(formats: &[FormatSummary]) -> Option<&FormatSummary> {
         .iter()
         .filter(|f| f.has_audio && !f.has_video)
         .max_by_key(|f| f.bitrate.unwrap_or(0))
+}
+
+/// The MP3 transcode source, in descending order of preference:
+/// [`MP3_SOURCE_ITAG`], any other audio-only stream, and finally the
+/// *cheapest* muxed stream. The last tier is what keeps videos YouTube
+/// serves without a separate audio track — live streams and anything that
+/// came back as a progressive-only list — out of "no format matched":
+/// ffmpeg's `-vn` discards the video track, so a muxed stream converts to
+/// MP3 just as well. It only costs the bandwidth of the video being thrown
+/// away, hence the smallest one rather than the best.
+fn mp3_source(formats: &[FormatSummary]) -> Option<&FormatSummary> {
+    formats
+        .iter()
+        .find(|f| f.itag == MP3_SOURCE_ITAG && f.has_audio && !f.has_video)
+        .or_else(|| best_audio_only(formats))
+        .or_else(|| cheapest_muxed(formats))
+}
+
+fn cheapest_muxed(formats: &[FormatSummary]) -> Option<&FormatSummary> {
+    formats
+        .iter()
+        .filter(|f| f.has_audio && f.has_video)
+        .min_by_key(|f| (f.height.unwrap_or(u32::MAX), f.bitrate.unwrap_or(u64::MAX)))
 }
 
 #[cfg(test)]
@@ -194,9 +262,24 @@ mod tests {
     }
 
     #[test]
-    fn mp3_returns_none_when_the_video_has_no_audio_only_format() {
-        let formats = vec![format(18, true, true, Some(360), Some(96_000))];
+    fn mp3_falls_back_to_the_cheapest_muxed_format_when_no_audio_only_one_exists() {
+        // What a live stream or an HLS-only extraction looks like: nothing
+        // is audio-only, but ffmpeg can still strip the video track. The
+        // video is discarded, so the smallest stream is the right one.
+        let formats = vec![
+            format(22, true, true, Some(720), Some(1_500_000)),
+            format(18, true, true, Some(360), Some(600_000)),
+            format(137, true, false, Some(1080), Some(3_000_000)),
+        ];
+        let picked = select_format(&formats, FormatPreference::Mp3).unwrap();
+        assert_eq!(picked.itag, 18);
+    }
+
+    #[test]
+    fn mp3_returns_none_only_when_nothing_carries_audio_at_all() {
+        let formats = vec![format(137, true, false, Some(1080), Some(3_000_000))];
         assert!(select_format(&formats, FormatPreference::Mp3).is_none());
+        assert!(select_format(&[], FormatPreference::Mp3).is_none());
     }
 
     #[test]

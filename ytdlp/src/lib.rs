@@ -49,6 +49,10 @@ pub struct Format {
     /// Approximate bits per second (yt-dlp's `tbr`, which is in kbit/s).
     pub bitrate: Option<u64>,
     pub filesize_bytes: Option<u64>,
+    /// yt-dlp's `vcodec`/`acodec`: the codec name, the literal `"none"` when
+    /// the track is absent, or `None` when yt-dlp doesn't know — it leaves
+    /// both unset on formats it hasn't probed, notably HLS manifests
+    /// (YouTube's itags 233/234, and every format of a live stream).
     pub vcodec: Option<String>,
     pub acodec: Option<String>,
 }
@@ -58,8 +62,18 @@ impl Format {
         self.vcodec.as_deref().is_some_and(|c| c != "none")
     }
 
+    /// Whether this stream carries audio. An unknown `acodec` counts as
+    /// audio unless the format is known to be video — yt-dlp's own rule for
+    /// labelling a format "audio only" in `-F`. Reading unknown as *no
+    /// audio* is what used to make an HLS-only video (a live stream, or any
+    /// video the extractor only got a manifest for) look like it had no
+    /// audio at all, so an MP3 request found nothing to convert.
     pub fn has_audio(&self) -> bool {
-        self.acodec.as_deref().is_some_and(|c| c != "none")
+        match self.acodec.as_deref() {
+            Some("none") => false,
+            Some(_) => true,
+            None => !self.is_video(),
+        }
     }
 }
 
@@ -210,8 +224,10 @@ impl YtDlp {
         Ok(raw.into())
     }
 
-    /// Downloads `format_id` (a yt-dlp format id — pass the itag as a
-    /// string) of `url_or_id` to the exact path `dest` (no output-template
+    /// Downloads `format_id` (a yt-dlp format *selector*: a bare format id
+    /// such as `"140"`, or a `/`-separated fallback chain such as
+    /// `"140/bestaudio/best"` that yt-dlp resolves left to right) of
+    /// `url_or_id` to the exact path `dest` (no output-template
     /// substitution: give it a literal final filename). `on_progress` is
     /// called with `(downloaded_bytes, total_bytes)` for every progress line
     /// yt-dlp emits — unthrottled, since throttling is a UI concern the
@@ -234,7 +250,13 @@ impl YtDlp {
             .arg(format_id)
             .arg("--newline")
             .arg("--progress-template")
-            .arg("download:%(progress.downloaded_bytes)s %(progress.total_bytes,progress.total_bytes_estimate)s")
+            // `download:` is consumed by yt-dlp as the template's *type*
+            // selector (restricting it to download progress) and never
+            // reaches stdout, so the template needs its own literal marker
+            // to tell these lines apart from everything else yt-dlp prints.
+            .arg(format!(
+                "download:{PROGRESS_MARKER} %(progress.downloaded_bytes)s %(progress.total_bytes,progress.total_bytes_estimate)s"
+            ))
             .arg("-o")
             .arg(dest)
             .arg(&target)
@@ -290,8 +312,13 @@ fn decode_line(raw: &[u8]) -> String {
     String::from_utf8_lossy(&raw[..end]).into_owned()
 }
 
+/// Prefix stamped on every progress line by the `--progress-template` in
+/// [`YtDlp::download`], so [`parse_progress_line`] can pick them out of
+/// yt-dlp's other stdout chatter.
+const PROGRESS_MARKER: &str = "dlprogress";
+
 fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
-    let rest = line.strip_prefix("download:")?;
+    let rest = line.strip_prefix(PROGRESS_MARKER)?;
     let mut parts = rest.split_whitespace();
     let downloaded = parts.next()?.parse::<u64>().ok()?;
     let total = parts
@@ -305,6 +332,8 @@ fn classify_error(stderr: &[u8]) -> Error {
     let text = String::from_utf8_lossy(stderr).trim().to_string();
     if text.contains("Sign in to confirm") || text.contains("not a bot") {
         Error::BotCheckRequired
+    } else if text.contains("Requested format is not available") {
+        Error::FormatNotFound
     } else if text.contains("Video unavailable")
         || text.contains("Private video")
         || text.contains("has been removed")
@@ -387,9 +416,9 @@ mod tests {
 
     #[test]
     fn decode_line_strips_the_line_terminator() {
-        assert_eq!(decode_line(b"download:1 2\r\n"), "download:1 2");
-        assert_eq!(decode_line(b"download:1 2\n"), "download:1 2");
-        assert_eq!(decode_line(b"download:1 2"), "download:1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2\r\n"), "dlprogress 1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2\n"), "dlprogress 1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2"), "dlprogress 1 2");
         assert_eq!(decode_line(b"\n"), "");
     }
 
@@ -413,19 +442,22 @@ mod tests {
     #[test]
     fn parse_progress_line_reads_both_numbers() {
         assert_eq!(
-            parse_progress_line("download:1234 5678"),
+            parse_progress_line("dlprogress 1234 5678"),
             Some((1234, 5678))
         );
     }
 
     #[test]
     fn parse_progress_line_treats_missing_total_as_zero() {
-        assert_eq!(parse_progress_line("download:1234 NA"), Some((1234, 0)));
+        assert_eq!(parse_progress_line("dlprogress 1234 NA"), Some((1234, 0)));
     }
 
     #[test]
     fn parse_progress_line_ignores_unrelated_lines() {
         assert_eq!(parse_progress_line("[youtube] Extracting URL"), None);
+        // yt-dlp strips the template's `download:` type selector before
+        // printing, so a line still carrying it isn't one of ours.
+        assert_eq!(parse_progress_line("download:1234 5678"), None);
     }
 
     #[test]
@@ -437,11 +469,47 @@ mod tests {
     }
 
     #[test]
+    fn classify_error_recognizes_an_unavailable_format() {
+        assert!(matches!(
+            classify_error(b"ERROR: [youtube] xyz: Requested format is not available"),
+            Error::FormatNotFound
+        ));
+    }
+
+    #[test]
     fn classify_error_recognizes_video_unavailable() {
         assert!(matches!(
             classify_error(b"ERROR: [youtube] xyz: Video unavailable"),
             Error::VideoUnavailable(_)
         ));
+    }
+
+    #[test]
+    fn an_unknown_acodec_counts_as_audio_on_a_non_video_format() {
+        // yt-dlp's HLS audio itags (233/234, and every format of a live
+        // stream) report vcodec "none" with acodec unset.
+        let hls_audio = Format {
+            itag: 234,
+            ext: "mp4".to_string(),
+            quality_label: None,
+            width: None,
+            height: None,
+            fps: None,
+            bitrate: None,
+            filesize_bytes: None,
+            vcodec: Some("none".to_string()),
+            acodec: None,
+        };
+        assert!(hls_audio.has_audio());
+        assert!(!hls_audio.is_video());
+
+        let hls_video = Format {
+            vcodec: Some("avc1.4D401E".to_string()),
+            acodec: None,
+            ..hls_audio.clone()
+        };
+        assert!(!hls_video.has_audio());
+        assert!(hls_video.is_video());
     }
 
     #[test]

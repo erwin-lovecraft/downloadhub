@@ -4,7 +4,10 @@
 use tokio_util::sync::CancellationToken;
 
 use crate::queue::{QueueError, QueueStatus, QueueStore};
-use crate::stream::{StreamClient, StreamError, YtDlpConfig};
+use crate::stream::{
+    select_format, FormatPreference, FormatRequest, FormatSummary, StreamClient, StreamError,
+    YtDlpConfig,
+};
 
 use super::output::{destination_path, mp3_destination_path};
 use super::progress::{DownloadPhase, DownloadProgress, Throttle};
@@ -16,8 +19,6 @@ pub enum DownloadError {
     EntryNotFound(i64),
     #[error("format itag {0} is no longer offered for this video")]
     FormatNotFound(u32),
-    #[error("MP3 conversion needs an audio-only format, but itag {0} has video")]
-    NotAudioOnly(u32),
     #[error("MP3 conversion is unavailable: no ffmpeg binary was found (set an ffmpeg path in Settings, or put ffmpeg on PATH)")]
     TranscoderUnavailable,
     #[error(transparent)]
@@ -164,20 +165,26 @@ async fn download_entry(
         .stream_client
         .get_video_formats(&entry.video_id, ctx.ytdlp_config)
         .await?;
-    let format = video
-        .format_by_itag(entry.itag)
-        .ok_or(DownloadError::FormatNotFound(entry.itag))?;
-    let total_bytes = format.content_length_bytes.unwrap_or(0);
+    let format = resolve_source_format(&video.formats, entry)?;
+    let total_bytes = format.and_then(|f| f.content_length_bytes).unwrap_or(0);
 
-    // Validate the conversion prerequisites up front so a doomed entry
-    // fails before spending bandwidth on the download.
+    // Validate the conversion prerequisite up front so a doomed entry fails
+    // before spending bandwidth on the download. The source stream itself
+    // needs no validating: ffmpeg drops any video track it carries.
     let transcoder = if entry.convert_to_mp3 {
-        if format.has_video {
-            return Err(DownloadError::NotAudioOnly(entry.itag));
-        }
         Some(ctx.transcoder.ok_or(DownloadError::TranscoderUnavailable)?)
     } else {
         None
+    };
+
+    // An MP3 entry lets the provider substitute another stream with audio,
+    // so a format list that shifted between enqueue and download (a
+    // different extractor client, a video that went live) doesn't sink a
+    // conversion that would have worked from any source.
+    let request = if entry.convert_to_mp3 {
+        FormatRequest::any_audio(format.map_or(entry.itag, |f| f.itag))
+    } else {
+        FormatRequest::exact(entry.itag)
     };
 
     tokio::fs::create_dir_all(&entry.output_path).await?;
@@ -188,7 +195,7 @@ async fn download_entry(
         .stream_client
         .download(
             &entry.video_id,
-            entry.itag,
+            request,
             &dest_path,
             ctx.ytdlp_config,
             |downloaded, total| {
@@ -229,6 +236,25 @@ async fn download_entry(
     })
 }
 
+/// The stream to actually fetch for `entry`: the itag it recorded, or — for
+/// an MP3 entry whose itag the video no longer offers — whatever else can
+/// feed the transcode. `None` means nothing in the list qualified and the
+/// provider will pick (`FormatFallback::AnyAudio`), which only an MP3 entry
+/// is allowed to do; anything else is a hard error, since substituting a
+/// quality the user explicitly chose would be wrong.
+fn resolve_source_format<'a>(
+    formats: &'a [FormatSummary],
+    entry: &crate::queue::QueueEntry,
+) -> Result<Option<&'a FormatSummary>, DownloadError> {
+    let exact = formats.iter().find(|f| f.itag == entry.itag);
+    if !entry.convert_to_mp3 {
+        return exact
+            .map(Some)
+            .ok_or(DownloadError::FormatNotFound(entry.itag));
+    }
+    Ok(exact.or_else(|| select_format(formats, FormatPreference::Mp3)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,7 +278,7 @@ mod tests {
         fn download<'a>(
             &'a self,
             _url_or_id: &'a str,
-            _itag: u32,
+            _request: FormatRequest,
             _dest: &'a std::path::Path,
             _config: &'a YtDlpConfig,
             _on_progress: &'a mut (dyn FnMut(u64, u64) + Send + 'a),

@@ -8,7 +8,7 @@ import { ChangeFormatDialog } from "@/components/ChangeFormatDialog";
 import { formatBytes } from "@/lib/format";
 import { openFolder } from "@/lib/opener";
 import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
-import type { QueueEntry, QueueStatus } from "@/lib/queue";
+import { formatDescription, type QueueEntry, type QueueStatus } from "@/lib/queue";
 
 function statusClassName(status: QueueStatus): string {
   switch (status) {
@@ -21,13 +21,6 @@ function statusClassName(status: QueueStatus): string {
     default:
       return "text-foreground";
   }
-}
-
-/** What an entry's format line reads as. */
-function formatDescription(entry: QueueEntry): string {
-  return entry.convert_to_mp3
-    ? `mp3 (from itag ${entry.itag})`
-    : `${entry.quality_label ?? "audio"} (itag ${entry.itag})`;
 }
 
 export function QueuePanel() {
