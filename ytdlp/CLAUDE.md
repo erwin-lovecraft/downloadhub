@@ -83,9 +83,11 @@ exchange.
 
 YouTube sometimes requires sign-in verification ("confirm you're not a bot")
 before serving formats or streams at all. The user pastes a Netscape
-`cookies.txt` export into Settings; `core::stream::resolve_ytdlp_config`
-writes it to `<app-data-dir>/cookies.txt` and this crate passes `--cookies
-<path>` whenever a path is given. `classify_error` recognizes yt-dlp's
+`cookies.txt` export and points Settings at that file;
+`core::stream::resolve_ytdlp_config` passes the path straight through and this
+crate hands it to yt-dlp as `--cookies <path>`. The file is the user's own on
+purpose: yt-dlp rewrites it after every run with the cookies YouTube rotated,
+so anything that keeps a copy makes a working export go stale. `classify_error` recognizes yt-dlp's
 bot-check stderr text and surfaces `Error::BotCheckRequired` with a message
 pointing at Settings, rather than a generic process-failure error.
 

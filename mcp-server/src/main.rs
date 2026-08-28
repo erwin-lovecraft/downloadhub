@@ -32,7 +32,6 @@ Both accept a LIST of videos: queue everything in one call rather than calling o
 struct DownloadHub {
     stream_client: Arc<StreamClient>,
     queue_store: Arc<QueueStore>,
-    app_data_dir: PathBuf,
     settings_path: PathBuf,
     youtube_api_key: Option<String>,
     tool_router: ToolRouter<Self>,
@@ -125,7 +124,6 @@ impl DownloadHub {
             stream_client: Arc::new(StreamClient::new(YtDlpProvider::new())),
             queue_store: Arc::new(queue_store),
             settings_path: downloadhub_core::paths::settings_path(&app_data_dir),
-            app_data_dir,
             youtube_api_key: downloadhub_core::secrets::youtube_api_key(),
             tool_router: Self::tool_router(),
         })
@@ -137,7 +135,7 @@ impl DownloadHub {
     /// running desktop app should take effect immediately.
     async fn ytdlp_config(&self) -> Result<downloadhub_core::stream::YtDlpConfig, String> {
         let settings = self.settings().await?;
-        Ok(downloadhub_core::stream::resolve_ytdlp_config(&self.app_data_dir, &settings).await)
+        Ok(downloadhub_core::stream::resolve_ytdlp_config(&settings))
     }
 
     /// Errors unless the user has MCP access enabled in the app settings.

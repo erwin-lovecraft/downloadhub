@@ -128,14 +128,44 @@ before serving formats or streams at all — yt-dlp surfaces this as a specific
 stderr message, which `downloadhub_ytdlp::classify_error` recognizes and
 turns into a clear `BotCheckRequired` error rather than a generic failure.
 The workaround is cookies from a signed-in browser session: the Settings
-dialog has a "yt-dlp cookies" field where the user pastes the contents of a
-Netscape-format `cookies.txt` export (e.g. via a "Get cookies.txt" browser
-extension). `core::settings::AppSettings.ytdlp_cookies` stores that text
-verbatim; `resolve_ytdlp_config` writes it to
-`<app-data-dir>/cookies.txt` and passes `--cookies <path>` to yt-dlp whenever
-it's non-empty. Stored as pasted text rather than a file path so the app
-needs no separate "browse to your cookies file" step — the dialog *is* the
-cookie store.
+dialog takes a **path** to a Netscape-format `cookies.txt` export (e.g. from a
+"Get cookies.txt" browser extension), stored in
+`core::settings::AppSettings.ytdlp_cookies_path` and passed straight through
+to yt-dlp as `--cookies <path>`.
+
+This used to store the pasted cookie *text* and write it to
+`<app-data-dir>/cookies.txt` before every call, so the app needed no file
+picker. That was wrong in a way that only showed up after a few downloads:
+**yt-dlp rewrites the cookies file after every run**, persisting whatever
+YouTube rotated. Overwriting it from the stored paste each time threw those
+refreshed cookies away and restored the originals, so a working export went
+stale and the bot check came back for good. Pointing at the user's own file
+lets yt-dlp keep it current, which is the whole reason it writes the file
+back. `settings::migrate_pasted_cookies` converts an old settings file once at
+startup by writing its text to `<app-data-dir>/cookies.txt` and recording that
+path.
+
+### Checking cookies actually work
+
+"Cookies are configured" and "cookies do anything" are different claims, and
+nothing in the normal flow distinguished them until a download failed:
+
+- A file whose tabs became spaces (copying an export through an editor or a
+  rendered web page) loads with **every entry skipped**, announced only as a
+  yt-dlp `WARNING` — on a stderr stream the app suppresses with
+  `--no-warnings` and doesn't read on success anyway.
+- Expired entries are dropped with no message at all.
+- Cookies exported from a session the user keeps browsing get invalidated by
+  YouTube, which no amount of reading the file can detect.
+
+All three end as the same bot check at download time, which reads like the
+cookies were never configured. So `core::stream::inspect_cookie_file` parses
+the file the way yt-dlp does — header, seven tab-separated fields, expiry,
+presence of a `SID`/`__Secure-*PSID` session cookie — and reports what yt-dlp
+would silently discard, and the `check_ytdlp_cookies` command ("Test cookies"
+in Settings) follows it with one real metadata request through `StreamClient`.
+Only that second half can tell the user the cookies are *accepted*, which is
+why the button does both rather than validating the file alone.
 
 ## Download queue persistence
 
@@ -326,7 +356,7 @@ their form state from `get_settings` each time they open — not on every render
 so it doesn't clobber what the user has already typed while a dialog stays
 open. Pre-filling, not forcing: both flows still allow a per-add override.
 
-`ytdlp_path`/`ytdlp_cookies` follow the same shape `ffmpeg_path` established:
+`ytdlp_path`/`ytdlp_cookies_path` follow the same shape `ffmpeg_path` established:
 `Option<String>`, `#[serde(default)]` so settings files predating the field
 still deserialize, resolved fresh per call rather than cached (see "Video
 format/quality lookup" → "Cookies" above).

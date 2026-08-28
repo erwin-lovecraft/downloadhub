@@ -23,6 +23,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             commands::download::download_all,
             commands::download::stop_download_all,
             commands::playlist::import_playlist_to_queue,
+            commands::cookies::check_ytdlp_cookies,
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::mcp::mcp_server_path,
@@ -34,6 +35,19 @@ pub fn run() {
     // Dev convenience: load YOUTUBE_API_KEY from a gitignored .env file if
     // present. No-op (and not an error) if the file is missing.
     let _ = dotenvy::dotenv();
+
+    // One-time upgrade for a settings file still holding pasted cookie text,
+    // from before cookies became a path to the user's own file. Best-effort
+    // and blocking: it's one small file, and it has to finish before any
+    // command can read settings.
+    if let Some(app_data_dir) = downloadhub_core::paths::app_data_dir() {
+        let settings_path = downloadhub_core::paths::settings_path(&app_data_dir);
+        if let Err(e) = tauri::async_runtime::block_on(
+            downloadhub_core::settings::migrate_pasted_cookies(&settings_path),
+        ) {
+            eprintln!("failed to migrate pasted yt-dlp cookies to a file: {e}");
+        }
+    }
 
     // The updater plugin needs the `plugins.updater` config (pubkey +
     // endpoints), so it lives here rather than in `configure`, which is also

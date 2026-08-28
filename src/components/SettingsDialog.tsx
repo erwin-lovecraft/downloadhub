@@ -10,10 +10,10 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import { pickFile, pickOutputFolder } from "@/lib/dialog";
 import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
 import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
+import { checkYtdlpCookies, type CookieCheck } from "@/lib/settings";
 
 export function SettingsDialog({
   open,
@@ -28,7 +28,9 @@ export function SettingsDialog({
   const [mcpEnabled, setMcpEnabled] = useState(true);
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [ytdlpPath, setYtdlpPath] = useState("");
-  const [ytdlpCookies, setYtdlpCookies] = useState("");
+  const [ytdlpCookiesPath, setYtdlpCookiesPath] = useState("");
+  const [cookieCheck, setCookieCheck] = useState<CookieCheck | null>(null);
+  const [checkingCookies, setCheckingCookies] = useState(false);
   const [serverPath, setServerPath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -39,7 +41,7 @@ export function SettingsDialog({
       setMcpEnabled(settings.data.mcp_enabled);
       setFfmpegPath(settings.data.ffmpeg_path ?? "");
       setYtdlpPath(settings.data.ytdlp_path ?? "");
-      setYtdlpCookies(settings.data.ytdlp_cookies ?? "");
+      setYtdlpCookiesPath(settings.data.ytdlp_cookies_path ?? "");
     }
   }, [settings.data]);
 
@@ -51,6 +53,26 @@ export function SettingsDialog({
       setCopied(false);
     }
   }, [open]);
+
+  /**
+   * Runs the real check rather than trusting the path: a cookies file can
+   * be present, well-formed, and still rejected by YouTube.
+   */
+  async function testCookies() {
+    setCheckingCookies(true);
+    setCookieCheck(null);
+    try {
+      setCookieCheck(await checkYtdlpCookies(ytdlpCookiesPath));
+    } catch (e) {
+      setCookieCheck({
+        ok: false,
+        summary: e instanceof Error ? e.message : String(e),
+        problems: [],
+      });
+    } finally {
+      setCheckingCookies(false);
+    }
+  }
 
   async function copyAgentConfig() {
     if (!serverPath) return;
@@ -183,20 +205,70 @@ export function SettingsDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium">yt-dlp cookies</label>
-              <Textarea
-                value={ytdlpCookies}
-                onChange={(e) => setYtdlpCookies(e.target.value)}
-                placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	...	...	..."
-                className="min-h-24 font-mono text-xs"
-              />
+              <label className="text-sm font-medium">yt-dlp cookies file</label>
+              <div className="flex gap-2">
+                <Input
+                  value={ytdlpCookiesPath}
+                  onChange={(e) => {
+                    setYtdlpCookiesPath(e.target.value);
+                    setCookieCheck(null);
+                  }}
+                  placeholder="e.g. /Users/me/Downloads/cookies.txt"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={async () => {
+                    const file = await pickFile();
+                    if (file) {
+                      setYtdlpCookiesPath(file);
+                      setCookieCheck(null);
+                    }
+                  }}
+                >
+                  Browse...
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={!ytdlpCookiesPath.trim() || checkingCookies}
+                  onClick={testCookies}
+                >
+                  {checkingCookies ? "Testing..." : "Test cookies"}
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 If YouTube starts asking to "confirm you're not a bot", export
-                your youtube.com cookies (Netscape/cookies.txt format, e.g.
-                with a "Get cookies.txt" browser extension while signed in)
-                and paste the file's contents here. Stored locally and passed
-                to yt-dlp; leave empty if you don't need this.
+                your youtube.com cookies to a cookies.txt file (Netscape
+                format, e.g. with a "Get cookies.txt" browser extension while
+                signed in) and point this at that file. Export from a
+                private/incognito window and close it without signing out —
+                YouTube invalidates cookies of a session you keep browsing.
+                yt-dlp keeps the file up to date as YouTube rotates them, so
+                leave it where it is.
               </p>
+              {cookieCheck && (
+                <div
+                  className={`rounded-md border p-2 text-xs ${
+                    cookieCheck.ok
+                      ? "border-muted bg-muted/40"
+                      : "border-destructive/40 bg-destructive/10"
+                  }`}
+                >
+                  <p className={cookieCheck.ok ? "" : "text-destructive"}>{cookieCheck.summary}</p>
+                  {cookieCheck.problems.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4 text-muted-foreground">
+                      {cookieCheck.problems.map((problem) => (
+                        <li key={problem}>{problem}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -241,7 +313,7 @@ export function SettingsDialog({
                   mcp_enabled: mcpEnabled,
                   ffmpeg_path: ffmpegPath.trim() || null,
                   ytdlp_path: ytdlpPath.trim() || null,
-                  ytdlp_cookies: ytdlpCookies.trim() || null,
+                  ytdlp_cookies_path: ytdlpCookiesPath.trim() || null,
                 })
               }
             >

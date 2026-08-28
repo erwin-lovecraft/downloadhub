@@ -129,12 +129,24 @@ message.
 YouTube sometimes demands sign-in verification before it will serve
 formats or streams — yt-dlp reports this distinctly, and the app surfaces
 it as a clear error pointing at Settings rather than a generic failure.
-The workaround: export your `youtube.com` cookies from a signed-in browser
-session in Netscape `cookies.txt` format (e.g. with a "Get cookies.txt
-LOCALLY" browser extension) and paste the file's contents into "yt-dlp
-cookies" in the Settings dialog. The app writes them to
-`<platform-data-dir>/downloadhub/cookies.txt` and passes `--cookies` to
-yt-dlp on every call; leave the field empty if you never hit this.
+The workaround: export your `youtube.com` cookies in Netscape `cookies.txt`
+format (e.g. with a "Get cookies.txt LOCALLY" browser extension) and point
+"yt-dlp cookies file" in the Settings dialog at that file. The app passes
+`--cookies <path>` to yt-dlp on every call; leave the field empty if you
+never hit this.
+
+Two things that decide whether it works:
+
+- **Export from a private/incognito window** — sign in, export, then close
+  the window without signing out. YouTube invalidates the cookies of a
+  session you keep browsing, which is the most common reason a correct-looking
+  export stops working.
+- **Leave the file where it is.** yt-dlp rewrites it after every run to keep
+  the cookies YouTube rotated, so it stays valid far longer than a copy would.
+
+Use **Test cookies** next to the field to check both halves: that the file is
+in a format yt-dlp can read at all (a common failure is tabs turned into
+spaces, which yt-dlp skips silently), and that YouTube actually accepts it.
 
 ## Video format/quality lookup
 

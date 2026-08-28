@@ -1,3 +1,4 @@
+pub mod cookies;
 pub mod download;
 pub mod mcp;
 pub mod playlist;

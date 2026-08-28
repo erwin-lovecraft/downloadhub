@@ -3,11 +3,13 @@
 
 mod client;
 mod config;
+mod cookies;
 mod models;
 mod provider;
 
 pub use client::StreamClient;
 pub use config::{resolve_ytdlp_config, YtDlpConfig};
+pub use cookies::{inspect_cookie_file, CookieFileReport};
 pub(crate) use models::select_format;
 pub use models::{
     FormatFallback, FormatPreference, FormatRequest, FormatSummary, ResolvedFormat, VideoDetail,
@@ -23,6 +25,10 @@ pub enum StreamError {
     VideoUnavailable(String),
     #[error("no format matched the requested filter")]
     FormatNotFound,
+    #[error(
+        "YouTube is requiring sign-in verification (bot check). Point Settings at a cookies.txt exported while signed in, and use \"Test cookies\" there to check it."
+    )]
+    BotCheckRequired,
     #[error("no yt-dlp binary was found (set a yt-dlp path in Settings, or put yt-dlp on PATH)")]
     YtDlpNotFound,
     #[error("yt-dlp error: {0}")]

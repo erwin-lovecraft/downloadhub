@@ -114,6 +114,7 @@ fn map_error(error: Error) -> StreamError {
     match error {
         Error::InvalidVideoId(input) => StreamError::InvalidVideoId(input),
         Error::VideoUnavailable(reason) => StreamError::VideoUnavailable(reason),
+        Error::BotCheckRequired => StreamError::BotCheckRequired,
         Error::FormatNotFound => StreamError::FormatNotFound,
         Error::BinaryNotFound(_) => StreamError::YtDlpNotFound,
         other => StreamError::Other(other.to_string()),
