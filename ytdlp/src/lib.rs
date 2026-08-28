@@ -234,7 +234,13 @@ impl YtDlp {
             .arg(format_id)
             .arg("--newline")
             .arg("--progress-template")
-            .arg("download:%(progress.downloaded_bytes)s %(progress.total_bytes,progress.total_bytes_estimate)s")
+            // `download:` is consumed by yt-dlp as the template's *type*
+            // selector (restricting it to download progress) and never
+            // reaches stdout, so the template needs its own literal marker
+            // to tell these lines apart from everything else yt-dlp prints.
+            .arg(format!(
+                "download:{PROGRESS_MARKER} %(progress.downloaded_bytes)s %(progress.total_bytes,progress.total_bytes_estimate)s"
+            ))
             .arg("-o")
             .arg(dest)
             .arg(&target)
@@ -290,8 +296,13 @@ fn decode_line(raw: &[u8]) -> String {
     String::from_utf8_lossy(&raw[..end]).into_owned()
 }
 
+/// Prefix stamped on every progress line by the `--progress-template` in
+/// [`YtDlp::download`], so [`parse_progress_line`] can pick them out of
+/// yt-dlp's other stdout chatter.
+const PROGRESS_MARKER: &str = "dlprogress";
+
 fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
-    let rest = line.strip_prefix("download:")?;
+    let rest = line.strip_prefix(PROGRESS_MARKER)?;
     let mut parts = rest.split_whitespace();
     let downloaded = parts.next()?.parse::<u64>().ok()?;
     let total = parts
@@ -387,9 +398,9 @@ mod tests {
 
     #[test]
     fn decode_line_strips_the_line_terminator() {
-        assert_eq!(decode_line(b"download:1 2\r\n"), "download:1 2");
-        assert_eq!(decode_line(b"download:1 2\n"), "download:1 2");
-        assert_eq!(decode_line(b"download:1 2"), "download:1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2\r\n"), "dlprogress 1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2\n"), "dlprogress 1 2");
+        assert_eq!(decode_line(b"dlprogress 1 2"), "dlprogress 1 2");
         assert_eq!(decode_line(b"\n"), "");
     }
 
@@ -413,19 +424,22 @@ mod tests {
     #[test]
     fn parse_progress_line_reads_both_numbers() {
         assert_eq!(
-            parse_progress_line("download:1234 5678"),
+            parse_progress_line("dlprogress 1234 5678"),
             Some((1234, 5678))
         );
     }
 
     #[test]
     fn parse_progress_line_treats_missing_total_as_zero() {
-        assert_eq!(parse_progress_line("download:1234 NA"), Some((1234, 0)));
+        assert_eq!(parse_progress_line("dlprogress 1234 NA"), Some((1234, 0)));
     }
 
     #[test]
     fn parse_progress_line_ignores_unrelated_lines() {
         assert_eq!(parse_progress_line("[youtube] Extracting URL"), None);
+        // yt-dlp strips the template's `download:` type selector before
+        // printing, so a line still carrying it isn't one of ours.
+        assert_eq!(parse_progress_line("download:1234 5678"), None);
     }
 
     #[test]
