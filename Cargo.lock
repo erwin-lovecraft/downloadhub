@@ -934,7 +934,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downloadhub"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "dotenvy",
  "downloadhub-core",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "downloadhub-core"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "dirs",
  "keyring",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "downloadhub-mcp-server"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "downloadhub-transcode"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "downloadhub-core",
  "thiserror 2.0.18",
@@ -993,7 +993,7 @@ dependencies = [
 
 [[package]]
 name = "downloadhub-ytdlp"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "downloadhub-core",
  "serde",
