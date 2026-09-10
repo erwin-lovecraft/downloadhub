@@ -43,15 +43,23 @@ Design constraints to preserve when touching these:
 - **Add tools take a list of videos**, not one per call. An agent queueing a
   ten-track album should spend one round-trip, not ten. Per-video failures go in
   `skipped` and never sink the batch.
-- **Add tools take a `FormatPreference`, never an itag.** They resolve it against
-  each video's real format list server-side via `core::enqueue`, so agents don't
-  need `get_video_formats` first and can't queue an itag a video doesn't offer.
+- **Add tools take a `FormatPreference`, never an itag.** `core::enqueue` turns
+  it into the itag that preference presumes and queues that, with **no format
+  lookup** — one `yt-dlp -J` per video is what used to make a ten-track add take
+  minutes, and `core::download` fetches the format list again anyway. Agents
+  therefore don't need `get_video_formats` first and can't put an itag of their
+  own into the queue. A wrong guess surfaces at download time, where an MP3
+  entry re-picks on its own and anything else fails with the itag named.
 - **`add_mp3_to_queue` stays its own tool** rather than collapsing into
   `add_to_queue(quality: "mp3")` (which also works). MP3 is the common request,
   and a purpose-named tool gets selected far more reliably than an enum value
   buried in another tool's schema.
 - **`output_path` is optional**, falling back to the settings default, then the
   OS Downloads folder.
+- **`YOUTUBE_API_KEY` is what supplies queue-row titles**, batched 50 ids per
+  `videos.list` call. Without it the add tools still work — entries are queued
+  titled by their video id and the desktop app fixes the title when it
+  downloads them — but the agent's own result reads back as bare ids.
 
 ## Gating
 

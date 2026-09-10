@@ -11,6 +11,8 @@
 
 use std::path::Path;
 
+use super::StreamError;
+
 /// What a cookies file actually contains, in the terms that decide whether
 /// yt-dlp can use it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
@@ -138,6 +140,64 @@ fn inspect_cookie_text(text: &str, now_secs: i64) -> CookieFileReport {
     report
 }
 
+/// The verdict the Settings dialog shows for a cookies file: the file's own
+/// problems plus what a live request through yt-dlp said about them.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CookieCheck {
+    /// Whether yt-dlp got a signed-in-looking response through: the file
+    /// parsed *and* YouTube served the request without a challenge.
+    pub ok: bool,
+    pub summary: String,
+    /// Everything wrong with the file itself, from
+    /// [`CookieFileReport::problems`], plus whatever the live request added.
+    /// Non-empty with `ok: true` is possible and worth showing: the request
+    /// went through, but the file is weaker than the user thinks.
+    pub problems: Vec<String>,
+}
+
+/// Reads a failed live probe as a verdict on the cookies it was sent with.
+///
+/// `None` means the failure says nothing about them — yt-dlp never ran, so
+/// the caller reports that error as itself. Everything else is YouTube
+/// refusing the request the cookies were attached to. That wording varies
+/// and yt-dlp keeps adding to it ("The page needs to be reloaded", for a
+/// session YouTube has invalidated), so this classifies by outcome rather
+/// than by matching strings that go stale: the probe is a public video that
+/// loads *without* cookies, so a failure with them is about them.
+pub fn failed_probe_verdict(error: &StreamError, problems: Vec<String>) -> Option<CookieCheck> {
+    if matches!(error, StreamError::YtDlpNotFound) {
+        return None;
+    }
+    let bot_check = matches!(error, StreamError::BotCheckRequired);
+    let mut problems = with_stale_session_hint(problems);
+    // The raw yt-dlp line, for the failures this has no wording of its own
+    // for. A bot check already says it in the summary.
+    if !bot_check {
+        problems.push(format!("yt-dlp reported: {error}"));
+    }
+    Some(CookieCheck {
+        ok: false,
+        summary: if bot_check {
+            "YouTube still asked for sign-in verification, so these cookies aren't being accepted."
+        } else {
+            "These cookies aren't working — YouTube refused the request they were attached to."
+        }
+        .to_string(),
+        problems,
+    })
+}
+
+/// The remaining explanation once the file itself checks out: YouTube
+/// invalidates cookies exported from a session that keeps browsing, which no
+/// amount of inspecting the file can detect.
+fn with_stale_session_hint(mut problems: Vec<String>) -> Vec<String> {
+    problems.push(
+        "The file looks fine, so the session behind it is most likely expired. Export again from a private/incognito window: sign in, export, then close the window without signing out — YouTube rotates cookies of a session you keep using."
+            .to_string(),
+    );
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +269,50 @@ mod tests {
             .problems()
             .iter()
             .any(|p| p.contains("session cookie")));
+    }
+
+    #[test]
+    fn a_missing_binary_is_not_a_verdict_on_the_cookies() {
+        assert_eq!(
+            failed_probe_verdict(&StreamError::YtDlpNotFound, Vec::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unrecognized_yt_dlp_failure_is_still_a_cookie_verdict() {
+        // The failure that started this: yt-dlp reports a session YouTube
+        // has invalidated as "The page needs to be reloaded", which nothing
+        // classifies as a bot check — and the raw line alone tells the user
+        // nothing about what to do.
+        let check = failed_probe_verdict(
+            &StreamError::Other("The page needs to be reloaded.".to_string()),
+            Vec::new(),
+        )
+        .expect("a failed probe with cookies is about the cookies");
+        assert!(!check.ok);
+        assert!(
+            check.summary.contains("aren't working"),
+            "{}",
+            check.summary
+        );
+        // The hint is the actionable half; the raw line is kept for what
+        // this has no wording of its own for.
+        assert!(check.problems.iter().any(|p| p.contains("incognito")));
+        assert!(check
+            .problems
+            .iter()
+            .any(|p| p.contains("The page needs to be reloaded")));
+    }
+
+    #[test]
+    fn a_bot_check_keeps_its_own_wording_and_the_files_problems() {
+        let check = failed_probe_verdict(
+            &StreamError::BotCheckRequired,
+            vec!["1 cookie(s) have already expired".to_string()],
+        )
+        .expect("a bot check is about the cookies");
+        assert!(check.summary.contains("sign-in verification"));
+        assert!(check.problems.iter().any(|p| p.contains("expired")));
     }
 }

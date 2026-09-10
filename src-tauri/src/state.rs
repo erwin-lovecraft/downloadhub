@@ -126,6 +126,20 @@ impl AppState {
         downloadhub_transcode::locate_ffmpeg().map(Transcoder::new)
     }
 
+    /// The current settings, re-read per call like everything else here.
+    /// Falls back to defaults when they can't be read at all (no writable
+    /// app data directory, an unparseable file) — every field this is used
+    /// for has a usable default, and refusing to queue because settings
+    /// wouldn't load would be worse than queueing at the defaults.
+    pub async fn load_settings(&self) -> downloadhub_core::settings::AppSettings {
+        let Some(settings_path) = self.settings_path.as_deref() else {
+            return Default::default();
+        };
+        downloadhub_core::settings::load(settings_path)
+            .await
+            .unwrap_or_default()
+    }
+
     /// Resolves yt-dlp's binary path override and cookies file, re-read on
     /// every search/download so a settings change (a new binary path, a
     /// different cookies file) applies without restarting. Falls back to

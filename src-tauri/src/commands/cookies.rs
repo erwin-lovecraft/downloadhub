@@ -3,14 +3,16 @@
 //! "Cookies are configured" and "cookies do anything" are different things:
 //! a file whose tabs became spaces loads with every entry skipped, expired
 //! entries are dropped without a word, and cookies exported from a session
-//! the user kept browsing get invalidated by YouTube. All three end as the
-//! same bot-check failure at download time, long after the Settings dialog
+//! the user kept browsing get invalidated by YouTube. All three surface as
+//! a download failing at some later point, long after the Settings dialog
 //! said nothing was wrong. This checks both halves up front — the file's
 //! shape, then a real request through yt-dlp.
 
 use std::path::PathBuf;
 
-use downloadhub_core::stream::{inspect_cookie_file, StreamError, YtDlpConfig};
+use downloadhub_core::stream::{
+    failed_probe_verdict, inspect_cookie_file, CookieCheck, YtDlpConfig,
+};
 use tauri::State;
 
 use crate::state::AppState;
@@ -19,19 +21,6 @@ use crate::state::AppState;
 /// YouTube. Public, 19 seconds, and about as unlikely to be taken down as a
 /// video gets — the probe only needs metadata, so nothing is downloaded.
 const PROBE_VIDEO_ID: &str = "jNQXAC9IVRw";
-
-#[derive(Debug, serde::Serialize)]
-pub struct CookieCheck {
-    /// Whether yt-dlp got a signed-in-looking response through: the file
-    /// parsed *and* YouTube served the probe without a bot check.
-    pub ok: bool,
-    pub summary: String,
-    /// Everything wrong with the file itself, from
-    /// `CookieFileReport::problems`. Non-empty with `ok: true` is possible
-    /// and worth showing: YouTube isn't challenging this request, but the
-    /// file is weaker than the user thinks.
-    pub problems: Vec<String>,
-}
 
 /// Checks the cookies file at `path` (the settings value, not yet saved —
 /// so the user can test before committing to it).
@@ -67,8 +56,8 @@ pub async fn check_ytdlp_cookies(
     // Deliberately the file the user picked, not a copy: yt-dlp rewrites it
     // with whatever YouTube rotated, which is the point of storing a path.
     let config = YtDlpConfig {
-        binary_path: state.resolve_ytdlp_config().await.binary_path,
         cookies_path: Some(cookies_path),
+        ..state.resolve_ytdlp_config().await
     };
     match state
         .stream_client
@@ -84,23 +73,10 @@ pub async fn check_ytdlp_cookies(
             ),
             problems,
         }),
-        Err(StreamError::BotCheckRequired) => Ok(CookieCheck {
-            ok: false,
-            summary: "YouTube still asked for sign-in verification, so these cookies aren't being accepted."
-                .to_string(),
-            problems: with_stale_session_hint(problems),
-        }),
-        Err(e) => Err(e.to_string()),
+        Err(e) => match failed_probe_verdict(&e, problems) {
+            Some(check) => Ok(check),
+            // Nothing was learned about the cookies: report the error itself.
+            None => Err(e.to_string()),
+        },
     }
-}
-
-/// The remaining explanation once the file itself checks out: YouTube
-/// invalidates cookies exported from a session that keeps browsing, which
-/// no amount of inspecting the file can detect.
-fn with_stale_session_hint(mut problems: Vec<String>) -> Vec<String> {
-    problems.push(
-        "The file looks fine, so the session behind it is most likely expired. Export again from a private/incognito window: sign in, export, then close the window without signing out — YouTube rotates cookies of a session you keep using."
-            .to_string(),
-    );
-    problems
 }

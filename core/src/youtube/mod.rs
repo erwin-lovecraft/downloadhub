@@ -7,5 +7,5 @@ mod duration;
 mod models;
 mod response;
 
-pub use client::{YoutubeClient, YoutubeError};
+pub use client::{extract_video_id, YoutubeClient, YoutubeError};
 pub use models::VideoSummary;

@@ -7,6 +7,33 @@ use std::path::PathBuf;
 
 use crate::settings::AppSettings;
 
+/// Which JavaScript engine yt-dlp may use to solve YouTube's "n" challenge.
+///
+/// YouTube hides playable format URLs behind a challenge that has to be
+/// *run*, not parsed. yt-dlp ships the solver scripts but no engine, and
+/// enables only Deno by default — so on a machine with Node and no Deno the
+/// challenge fails, formats are dropped, and an authenticated request (one
+/// carrying cookies) fails outright as "The page needs to be reloaded"
+/// instead of degrading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JsRuntime {
+    /// Enable Node alongside yt-dlp's own default, and let yt-dlp use
+    /// whichever engine it actually finds (it prefers Deno). Naming an
+    /// engine that isn't installed costs nothing, so this is the default.
+    #[default]
+    Auto,
+    /// Use Node and nothing else — for a Deno that's installed but broken.
+    Node,
+    /// Use Deno and nothing else.
+    Deno,
+    /// Pass no runtime flag at all. yt-dlp then behaves as it always has
+    /// (Deno only), which is the point: `--js-runtimes` is recent enough
+    /// that an older yt-dlp set as `ytdlp_path` would abort on the unknown
+    /// option, taking every download with it, not just the cookie ones.
+    Off,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct YtDlpConfig {
     /// `None` means "auto-locate" — left to the `StreamProvider` impl (the
@@ -18,6 +45,8 @@ pub struct YtDlpConfig {
     /// persist the cookies YouTube rotated, and a copy would throw those
     /// away on the next call. `None` when no cookies are configured.
     pub cookies_path: Option<PathBuf>,
+    /// Which JavaScript engine yt-dlp may use — see [`JsRuntime`].
+    pub js_runtime: JsRuntime,
 }
 
 /// Resolves a [`YtDlpConfig`] from `settings`. Both fields are used exactly
@@ -28,6 +57,7 @@ pub fn resolve_ytdlp_config(settings: &AppSettings) -> YtDlpConfig {
     YtDlpConfig {
         binary_path: non_empty_path(settings.ytdlp_path.as_deref()),
         cookies_path: non_empty_path(settings.ytdlp_cookies_path.as_deref()),
+        js_runtime: settings.ytdlp_js_runtime,
     }
 }
 
@@ -47,6 +77,18 @@ mod tests {
         let config = resolve_ytdlp_config(&AppSettings::default());
         assert!(config.binary_path.is_none());
         assert!(config.cookies_path.is_none());
+        // Not "no flag": the default enables Node so a machine without Deno
+        // can still solve the challenge.
+        assert_eq!(config.js_runtime, JsRuntime::Auto);
+    }
+
+    #[test]
+    fn the_js_runtime_choice_is_carried_through() {
+        let settings = AppSettings {
+            ytdlp_js_runtime: JsRuntime::Off,
+            ..AppSettings::default()
+        };
+        assert_eq!(resolve_ytdlp_config(&settings).js_runtime, JsRuntime::Off);
     }
 
     #[test]

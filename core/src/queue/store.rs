@@ -78,6 +78,17 @@ impl QueueStore {
             .await
     }
 
+    /// Corrects an entry's title, leaving its status and format alone.
+    ///
+    /// Enqueueing may queue an entry titled by its video id (when no title
+    /// lookup was possible — see `crate::enqueue::enqueue_videos`), and the
+    /// download path is the first place the real title is known for certain.
+    pub async fn set_title(&self, id: i64, title: &str) -> Result<(), QueueError> {
+        let title = title.to_string();
+        self.with_repository(move |repo| repo.set_title(id, title))
+            .await
+    }
+
     /// Repoints an entry at a different stream format, resetting it to
     /// `Queued` with its error cleared. Returns the updated entry, or
     /// `None` if it no longer exists.

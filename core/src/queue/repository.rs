@@ -106,6 +106,14 @@ impl<'c> QueueRepository<'c> {
         self.get(id)
     }
 
+    pub(crate) fn set_title(&self, id: i64, title: String) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE queue_entries SET title = ?1 WHERE id = ?2",
+            rusqlite::params![title, id],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn set_status(
         &self,
         id: i64,

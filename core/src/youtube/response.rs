@@ -128,6 +128,9 @@ pub(crate) struct VideosListItem {
     id: String,
     #[serde(rename = "contentDetails")]
     content_details: Option<ContentDetails>,
+    /// Only present when the request asked for `part=snippet`; the
+    /// duration-enrichment call doesn't.
+    snippet: Option<VideosListSnippet>,
 }
 
 impl VideosListItem {
@@ -139,6 +142,18 @@ impl VideosListItem {
             .and_then(|cd| duration::parse_iso8601(&cd.duration));
         (self.id, seconds)
     }
+
+    /// The video id and its title, dropping an item whose title came back
+    /// blank (a private or deleted video the API still lists).
+    pub(crate) fn into_title(self) -> Option<(String, String)> {
+        let title = self.snippet?.title.trim().to_string();
+        (!title.is_empty()).then_some((self.id, title))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct VideosListSnippet {
+    title: String,
 }
 
 #[derive(Debug, Deserialize)]

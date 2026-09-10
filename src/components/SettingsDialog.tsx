@@ -13,7 +13,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { pickFile, pickOutputFolder } from "@/lib/dialog";
 import { buildAgentConfig, mcpServerPath } from "@/lib/mcp";
 import { FORMAT_PREFERENCE_LABELS, type FormatPreference } from "@/lib/enqueue";
-import { checkYtdlpCookies, type CookieCheck } from "@/lib/settings";
+import {
+  checkYtdlpCookies,
+  JS_RUNTIME_LABELS,
+  type CookieCheck,
+  type JsRuntime,
+} from "@/lib/settings";
 
 export function SettingsDialog({
   open,
@@ -29,6 +34,8 @@ export function SettingsDialog({
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [ytdlpPath, setYtdlpPath] = useState("");
   const [ytdlpCookiesPath, setYtdlpCookiesPath] = useState("");
+  const [jsRuntime, setJsRuntime] = useState<JsRuntime>("auto");
+  const [enqueueItag, setEnqueueItag] = useState("");
   const [cookieCheck, setCookieCheck] = useState<CookieCheck | null>(null);
   const [checkingCookies, setCheckingCookies] = useState(false);
   const [serverPath, setServerPath] = useState<string | null>(null);
@@ -42,6 +49,8 @@ export function SettingsDialog({
       setFfmpegPath(settings.data.ffmpeg_path ?? "");
       setYtdlpPath(settings.data.ytdlp_path ?? "");
       setYtdlpCookiesPath(settings.data.ytdlp_cookies_path ?? "");
+      setJsRuntime(settings.data.ytdlp_js_runtime);
+      setEnqueueItag(settings.data.enqueue_itag?.toString() ?? "");
     }
   }, [settings.data]);
 
@@ -104,7 +113,9 @@ export function SettingsDialog({
         )}
         {settings.error && (
           <p className="text-sm text-destructive">
-            {settings.error instanceof Error ? settings.error.message : String(settings.error)}
+            {settings.error instanceof Error
+              ? settings.error.message
+              : String(settings.error)}
           </p>
         )}
 
@@ -114,7 +125,9 @@ export function SettingsDialog({
                 settings list can never push it off-screen. */}
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">Default output folder</label>
+                <label className="text-sm font-medium">
+                  Default output folder
+                </label>
                 <div className="flex gap-2">
                   <Input
                     value={outputPath}
@@ -139,7 +152,9 @@ export function SettingsDialog({
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium">Default quality</label>
                 <div className="flex gap-2">
-                  {(Object.keys(FORMAT_PREFERENCE_LABELS) as FormatPreference[]).map((option) => (
+                  {(
+                    Object.keys(FORMAT_PREFERENCE_LABELS) as FormatPreference[]
+                  ).map((option) => (
                     <Button
                       key={option}
                       type="button"
@@ -154,7 +169,30 @@ export function SettingsDialog({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">ffmpeg path (MP3 conversion)</label>
+                <label className="text-sm font-medium">
+                  Queue itag (optional)
+                </label>
+                <Input
+                  value={enqueueItag}
+                  onChange={(e) =>
+                    setEnqueueItag(e.target.value.replace(/[^0-9]/g, ""))
+                  }
+                  placeholder="e.g. 140 — leave blank to match the quality above"
+                  inputMode="numeric"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Adding to the queue never inspects a video's formats, so it
+                  is instant. Entries record this itag (or one matching the
+                  quality above) and the real format is checked when you
+                  download. If a download fails on the format, open the
+                  entry's format list and pick another.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">
+                  ffmpeg path (MP3 conversion)
+                </label>
                 <div className="flex gap-2">
                   <Input
                     value={ffmpegPath}
@@ -175,8 +213,8 @@ export function SettingsDialog({
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Leave empty to use the bundled ffmpeg (Windows) or one found on
-                  PATH. Applies to the next download — no restart needed.
+                  Leave empty to use the bundled ffmpeg (Windows) or one found
+                  on PATH. Applies to the next download — no restart needed.
                 </p>
               </div>
 
@@ -201,14 +239,12 @@ export function SettingsDialog({
                     Browse...
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Leave empty to use the bundled yt-dlp or one found on PATH.
-                  Applies to the next search or download — no restart needed.
-                </p>
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium">yt-dlp cookies file</label>
+                <label className="text-sm font-medium">
+                  yt-dlp cookies file
+                </label>
                 <div className="flex gap-2">
                   <Input
                     value={ytdlpCookiesPath}
@@ -244,16 +280,6 @@ export function SettingsDialog({
                     {checkingCookies ? "Testing..." : "Test cookies"}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  If YouTube starts asking to "confirm you're not a bot", export
-                  your youtube.com cookies to a cookies.txt file (Netscape
-                  format, e.g. with a "Get cookies.txt" browser extension while
-                  signed in) and point this at that file. Export from a
-                  private/incognito window and close it without signing out —
-                  YouTube invalidates cookies of a session you keep browsing.
-                  yt-dlp keeps the file up to date as YouTube rotates them, so
-                  leave it where it is.
-                </p>
                 {cookieCheck && (
                   <div
                     className={`rounded-md border p-2 text-xs ${
@@ -262,7 +288,9 @@ export function SettingsDialog({
                         : "border-destructive/40 bg-destructive/10"
                     }`}
                   >
-                    <p className={cookieCheck.ok ? "" : "text-destructive"}>{cookieCheck.summary}</p>
+                    <p className={cookieCheck.ok ? "" : "text-destructive"}>
+                      {cookieCheck.summary}
+                    </p>
                     {cookieCheck.problems.length > 0 && (
                       <ul className="mt-1 list-disc pl-4 text-muted-foreground">
                         {cookieCheck.problems.map((problem) => (
@@ -275,32 +303,58 @@ export function SettingsDialog({
               </div>
 
               <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium">
+                  JavaScript runtime (yt-dlp)
+                </label>
+                <div className="flex gap-2">
+                  {(Object.keys(JS_RUNTIME_LABELS) as JsRuntime[]).map(
+                    (option) => (
+                      <Button
+                        key={option}
+                        type="button"
+                        size="sm"
+                        variant={jsRuntime === option ? "default" : "outline"}
+                        onClick={() => setJsRuntime(option)}
+                      >
+                        {JS_RUNTIME_LABELS[option]}
+                      </Button>
+                    ),
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <Checkbox
                     checked={mcpEnabled}
-                    onCheckedChange={(checked) => setMcpEnabled(checked === true)}
+                    onCheckedChange={(checked) =>
+                      setMcpEnabled(checked === true)
+                    }
                   />
                   Allow AI agent access (MCP server)
                 </label>
-                <p className="text-xs text-muted-foreground">
-                  Lets external AI agents search YouTube and add entries to your
-                  queue directly. They cannot start downloads — only you can,
-                  with "Download all". Review the queue before starting it.
-                </p>
               </div>
 
               {mcpEnabled && serverPath && (
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium">Connect an AI agent</label>
+                  <label className="text-sm font-medium">
+                    Connect an AI agent
+                  </label>
                   <p className="text-xs text-muted-foreground">
                     Add this to your agent's MCP config (Claude Desktop, Claude
-                    Code, Gemini CLI, Codex). Fill in your YouTube API key if you
-                    want keyword search. See docs/MCP_SETUP.md for per-agent steps.
+                    Code, Gemini CLI, Codex). Fill in your YouTube API key if
+                    you want keyword search. See docs/MCP_SETUP.md for per-agent
+                    steps.
                   </p>
                   <pre className="max-h-40 overflow-auto rounded-md border bg-muted p-2 text-xs">
                     {buildAgentConfig(serverPath)}
                   </pre>
-                  <Button type="button" variant="outline" size="sm" onClick={copyAgentConfig}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={copyAgentConfig}
+                  >
                     {copied ? "Copied!" : "Copy config"}
                   </Button>
                 </div>
@@ -319,6 +373,10 @@ export function SettingsDialog({
                     ffmpeg_path: ffmpegPath.trim() || null,
                     ytdlp_path: ytdlpPath.trim() || null,
                     ytdlp_cookies_path: ytdlpCookiesPath.trim() || null,
+                    ytdlp_js_runtime: jsRuntime,
+                    enqueue_itag: enqueueItag.trim()
+                      ? Number(enqueueItag.trim())
+                      : null,
                   })
                 }
               >
@@ -327,10 +385,14 @@ export function SettingsDialog({
 
               {save.error && (
                 <p className="text-sm text-destructive">
-                  {save.error instanceof Error ? save.error.message : String(save.error)}
+                  {save.error instanceof Error
+                    ? save.error.message
+                    : String(save.error)}
                 </p>
               )}
-              {save.isSuccess && <p className="text-sm text-muted-foreground">Saved.</p>}
+              {save.isSuccess && (
+                <p className="text-sm text-muted-foreground">Saved.</p>
+              )}
             </div>
           </>
         )}

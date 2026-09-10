@@ -14,7 +14,7 @@ Rationale for the decisions below lives in
 | `youtube` | YouTube Data API v3 client: `search.list`, `videos.list`, `playlistItems.list`. Direct `reqwest` + `serde`, not the generated crate. |
 | `stream` | The `StreamProvider` trait (the yt-dlp seam), `StreamClient` (format selection built on top of it), format DTOs, `FormatPreference` selection, and `FormatRequest`/`FormatFallback` (how far a download may deviate from the itag it was given). No concrete yt-dlp dependency — see `../ytdlp/CLAUDE.md`. |
 | `queue` | SQLite-backed download queue: entry types, schema, SQL, async store. |
-| `enqueue` | Bulk add / re-format driven by a `FormatPreference` rather than an itag. |
+| `enqueue` | Bulk add / re-format driven by a `FormatPreference` rather than an itag. Adding does **no** format lookup; re-formatting does. |
 | `download` | Download orchestration, progress reporting, output naming, the `Transcode` seam. |
 | `settings` | `AppSettings` JSON blob load/save. |
 | `paths` | App data dir, queue DB path, settings path, OS Downloads dir. |
@@ -50,6 +50,14 @@ Keep it that way when adding files.
   substituting a quality the user picked would be wrong. See
   `../docs/ARCHITECTURE.md`, "Why an MP3 request never fails for want of a
   format".
+- **Enqueueing never fetches a format list.** `enqueue::enqueue_videos` records
+  `FormatPreference::presumed_itag` (or `AppSettings::enqueue_itag`) and leaves
+  verification to `download`, which re-fetches the list regardless. Resolving up
+  front cost one yt-dlp process per video — seconds each, sequentially — to buy
+  precision the download path immediately re-derived. Don't reintroduce it; see
+  `../docs/ARCHITECTURE.md`, "Why enqueueing doesn't resolve the real format".
+  Queue-row titles come from `youtube::fetch_titles` instead: one batched
+  `videos.list` call for up to 50 ids.
 - **No concrete transcoder.** `download::Transcode` is an object-safe trait;
   `core` decides *when* post-processing runs, never *how*. Errors cross the seam
   as a boxed `BoxError` that `core` only displays.

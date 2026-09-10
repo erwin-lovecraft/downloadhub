@@ -23,7 +23,40 @@ export interface AppSettings {
    * rotated, and keeping our own copy threw those refreshed cookies away.
    */
   ytdlp_cookies_path: string | null;
+  /**
+   * Which JavaScript engine yt-dlp may use for YouTube's "n" challenge.
+   * YouTube hides playable format URLs behind a challenge that has to be
+   * run, and yt-dlp ships the solver scripts but no engine — only Deno is
+   * enabled by default, so a machine with Node and no Deno loses formats,
+   * and a request carrying cookies fails outright.
+   */
+  ytdlp_js_runtime: JsRuntime;
+  /**
+   * The itag recorded on every newly queued entry, instead of the one the
+   * chosen quality presumes (0 = let yt-dlp pick any audio stream for MP3,
+   * 140 for audio-only, 18 for video). null uses those defaults.
+   *
+   * Adding to the queue never checks a video's real format list — that
+   * would cost a yt-dlp launch per video, and the download re-fetches the
+   * list anyway. A wrong itag surfaces as a failed download, fixed by
+   * picking a real format from the entry's format list.
+   */
+  enqueue_itag: number | null;
 }
+
+/**
+ * "auto" enables Node alongside yt-dlp's own default and lets it use
+ * whichever engine it finds; "node"/"deno" force one; "off" passes no flag
+ * at all, for a yt-dlp too old to know the option.
+ */
+export type JsRuntime = "auto" | "node" | "deno" | "off";
+
+export const JS_RUNTIME_LABELS: Record<JsRuntime, string> = {
+  auto: "Auto",
+  node: "Node",
+  deno: "Deno",
+  off: "Off",
+};
 
 /** The result of checking a cookies file, from the `check_ytdlp_cookies` command. */
 export interface CookieCheck {

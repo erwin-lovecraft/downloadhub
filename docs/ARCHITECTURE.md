@@ -314,18 +314,62 @@ itag, and which itags a video offers varies video to video, so picking one itag
 for an entire playlist isn't meaningful the way it is for a single video.
 
 Instead `core::stream::FormatPreference` (`BestProgressive` / `BestAudioOnly` /
-`Mp3`) is a quality *shortcut*: `core::enqueue` resolves each selected video's
-own format list against it individually, sequentially, one call per video, and
-enqueues whatever itag that resolves to. This was chosen over:
+`Mp3`) is a quality *shortcut*, and `core::enqueue::enqueue_videos` records the
+itag that preference *presumes* — `FormatPreference::presumed_itag`: itag 18
+for video, 140 for audio-only, `AUTO_AUDIO_ITAG` for MP3 — without consulting
+the video's format list at all. `AppSettings::enqueue_itag` overrides it for a
+user who knows the itag they always want.
 
-- hardcoding a "universal" itag like 18/140, which isn't guaranteed present on
-  every video and wouldn't adapt to picking the *highest* available quality; or
-- storing an unresolved preference on the entry and resolving at download time,
-  which would widen `QueueEntry`'s `itag: u32` into a resolved-or-preference
-  union.
+### Why enqueueing doesn't resolve the real format
 
-Resolving up front means failures surface immediately in the "N added, M
-skipped" result rather than later as stuck `Failed` entries.
+It used to: each video's own format list was fetched and the preference
+resolved against it, one call per video, sequentially. That is the more precise
+design and it was the wrong trade.
+
+Fetching a format list means launching `yt-dlp -J`, and the process launch
+dominates: a PyInstaller-packaged yt-dlp spends ~11 s on macOS just extracting
+and dynamically linking its bundle before running a line of Python (measured;
+a pip/homebrew install of the same version starts in ~0.3 s). At roughly 17 s
+per video end-to-end, a ten-track album cost ~170 s to *queue* — for a queue
+that downloads nothing until the user clicks "Download all".
+
+What made that cost pure waste is that `core::download::runner` fetches the
+format list **again** at download time, because a list resolved minutes or days
+earlier can't be trusted anyway. Enqueue-time resolution was buying a precision
+the download path immediately re-derived.
+
+So enqueueing now writes a presumed itag and lets download time be the one
+place a format is checked, which it already was. The three preferences degrade
+differently there, by design:
+
+- an **MP3** entry records `AUTO_AUDIO_ITAG`, and `resolve_source_format` picks
+  a real audio stream from the freshly fetched list (itag 140, then anything
+  else with audio) — a presumed itag can't be wrong for MP3, since the source
+  stream is an implementation detail ffmpeg erases;
+- an **audio-only** or **video** entry records an exact itag and fails loudly
+  with `format itag N is no longer offered for this video` if the video doesn't
+  have it. The user then opens that entry's format list and picks a real one
+  (`set_queue_entry_format`), which is the same repair path a format that went
+  stale between enqueue and download always needed.
+
+The cost of the change is honest: a wrong guess surfaces as a `Failed` entry
+after the user starts the queue, rather than as a `skipped` line at enqueue
+time. `skipped` now reports only inputs that carry no video id at all. In
+exchange, queueing ten videos costs one batched `videos.list` call (~0.4 s
+total, measured) instead of ten yt-dlp launches.
+
+### Where titles come from
+
+A queue row still needs a title — for the queue list and for the output
+filename. `core::youtube::fetch_titles` gets them from `videos.list`, whose
+`id` parameter takes 50 ids per request, so a whole batch is one HTTP call
+rather than one subprocess per video.
+
+Without an API key, or if that call fails, entries are queued titled by their
+video id, and `core::download::runner::real_title` replaces the placeholder
+with the real title (which it has already fetched) before naming the file,
+writing it back to the row. Queueing is the caller's actual goal; a title
+lookup should not be able to sink it.
 
 `BestProgressive` deliberately does *not* fall back to a video-only format when
 no progressive one exists; silently producing a video with no audio violates
@@ -455,17 +499,18 @@ fine, since ffmpeg's `-vn` discards any video track the source carries.
 
 So MP3 is the one preference allowed to degrade, in four tiers:
 
-1. `select_format` (`core::stream::models`) prefers itag 140, then any other
-   audio-only stream, then the **cheapest muxed** one — smallest rather than
-   best, since its video is downloaded only to be thrown away. An unknown
-   `acodec` counts as audio unless the format is known to be video
+1. An MP3 entry is queued at `AUTO_AUDIO_ITAG` (0, not a real itag), which
+   means "any stream with audio, picked at download time". Enqueueing never
+   looks at a format list, so there is nothing to pick from there — and for
+   MP3 there is nothing worth picking either, since ffmpeg's `-vn` erases which
+   stream it was.
+2. At download time `select_format` (`core::stream::models`) prefers itag 140,
+   then any other audio-only stream, then the **cheapest muxed** one — smallest
+   rather than best, since its video is downloaded only to be thrown away. An
+   unknown `acodec` counts as audio unless the format is known to be video
    (`downloadhub_ytdlp::Format::has_audio`), which is yt-dlp's own rule for
    calling a format "audio only".
-2. With nothing at all to point at — the shape a source whose format ids aren't
-   numeric takes by the time it reaches `core`, since those are dropped in
-   conversion — the entry records `AUTO_AUDIO_ITAG` (0, not a real itag) and the
-   pick is left to download time.
-3. At download time `run_download` re-selects for an MP3 entry whose recorded
+3. That re-selection also covers an MP3 entry the *user* pointed at a specific
    itag the video no longer offers, rather than failing `FormatNotFound` the way
    an entry at a user-chosen quality still does.
 4. The download itself goes out as `FormatRequest::any_audio`, which
@@ -539,9 +584,11 @@ deliberately different in kind:
 - **Many entries, one preference** (`set_queue_entries_quality`): check entries
   (or "Select all queued") and apply a `FormatPreference`. It *can't* take an
   itag, because a multi-select spans videos whose available itags differ — the
-  same constraint that produced `FormatPreference` for playlist import, which
-  is why `core::enqueue::reformat_entries` shares its per-video resolution and
-  its "skip and report, don't abort" rule.
+  same constraint that produced `FormatPreference` for playlist import. Unlike
+  enqueueing, `core::enqueue::reformat_entries` *does* resolve each video's real
+  format list: it is an explicit "change this to that" on entries the user is
+  looking at, where landing on a real itag is the point, and it keeps the "skip
+  and report, don't abort" rule for entries that fail to resolve.
 
 Both reset the entry to `Queued` with `error_message` cleared
 (`QueueStore::set_format`): the previous format's failure says nothing about
@@ -616,8 +663,8 @@ than a single video. An agent queueing a ten-track album spends one tool call,
 not ten — ten round-trips of tool-call JSON plus ten result payloads is a real
 token cost for the agent and a real latency cost for the user, and nothing about
 the operation needs to be serialized per video. Per-video failures don't sink
-the batch: `core::enqueue::enqueue_videos` resolves each independently and
-reports failures in `skipped` alongside `added`.
+the batch: `core::enqueue::enqueue_videos` reports them in `skipped` alongside
+`added`.
 
 `add_mp3_to_queue` exists as its own tool rather than as
 `add_to_queue(quality: "mp3")` (which also works) because MP3 is the common
@@ -627,9 +674,11 @@ tool's parameter schema.
 
 Neither tool asks for an itag. They take a `FormatPreference`
 (`best_progressive` / `best_audio_only` / `mp3`, defaulting to the user's
-configured default quality) and resolve it against each video's real format list
-server-side. Agents don't have to call `get_video_formats` first — another
-round-trip per video saved — and can't queue an itag the video doesn't offer.
+configured default quality), which `core::enqueue` turns into the itag that
+preference presumes — no format lookup, so a ten-video add is one batched
+`videos.list` call rather than ten yt-dlp launches (see "Why enqueueing doesn't
+resolve the real format"). Agents therefore never need `get_video_formats`
+first, and can't put an itag of their own choosing into the queue at all.
 `output_path` falls back to the user's default output folder, then to the OS
 Downloads folder, so the common case needs no path at all.
 

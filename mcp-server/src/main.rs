@@ -287,9 +287,6 @@ impl DownloadHub {
         }))
     }
 
-    /// The shared body of both add tools: resolve each video's format
-    /// against `quality` and insert it. Per-video failures are reported,
-    /// not fatal (`core::enqueue`).
     async fn enqueue(
         &self,
         videos: Vec<String>,
@@ -299,16 +296,17 @@ impl DownloadHub {
         if videos.is_empty() {
             return Err("no videos given; pass at least one URL or video id".to_string());
         }
+        let settings = self.settings().await?;
         let output_path = self.resolve_output_path(output_path).await?;
-        let ytdlp_config = self.ytdlp_config().await?;
+        let youtube = self.youtube_api_key.clone().map(YoutubeClient::new);
 
         let outcome = enqueue::enqueue_videos(
-            &self.stream_client,
+            youtube.as_ref(),
             &self.queue_store,
             &videos,
             quality,
             &output_path,
-            &ytdlp_config,
+            settings.enqueue_itag,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -344,11 +342,6 @@ impl ServerHandler for DownloadHub {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Dev convenience, same as the desktop app: pick up YOUTUBE_API_KEY
-    // from a gitignored .env when run from the repo. Real registrations
-    // pass env through the MCP client config (docs/MCP_SETUP.md). MCP
-    // stdio servers must keep stdout for the protocol, so diagnostics go
-    // to stderr only.
     let _ = dotenvy::dotenv();
 
     let server = DownloadHub::new().inspect_err(|e| eprintln!("mcp-server startup failed: {e}"))?;

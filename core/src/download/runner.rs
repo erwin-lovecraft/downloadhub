@@ -165,6 +165,10 @@ async fn download_entry(
         .stream_client
         .get_video_formats(&entry.video_id, ctx.ytdlp_config)
         .await?;
+    let title = real_title(entry, &video);
+    if title != entry.title {
+        ctx.store.set_title(queue_id, &title).await?;
+    }
     let format = resolve_source_format(&video.formats, entry)?;
     let total_bytes = format.and_then(|f| f.content_length_bytes).unwrap_or(0);
 
@@ -188,7 +192,7 @@ async fn download_entry(
     };
 
     tokio::fs::create_dir_all(&entry.output_path).await?;
-    let dest_path = destination_path(&entry.output_path, &entry.title, format);
+    let dest_path = destination_path(&entry.output_path, &title, format);
 
     let mut throttle = Throttle::new();
     let bytes_written = ctx
@@ -218,7 +222,7 @@ async fn download_entry(
             total_bytes,
             phase: DownloadPhase::Transcoding,
         });
-        let mp3_path = mp3_destination_path(&entry.output_path, &entry.title);
+        let mp3_path = mp3_destination_path(&entry.output_path, &title);
         transcoder
             .to_mp3(&dest_path, &mp3_path)
             .await
@@ -234,6 +238,22 @@ async fn download_entry(
         total_bytes,
         phase: DownloadPhase::Downloading,
     })
+}
+
+/// The title to name this entry's files with.
+///
+/// Normally the one the entry recorded — the user saw it in the queue and
+/// expects the file to match. The exception is an entry queued without a
+/// title lookup, which `crate::enqueue::enqueue_videos` marks by storing the
+/// video id as the title: this is the first point the real title is known,
+/// so it wins, and the caller writes it back to the queue row.
+fn real_title(entry: &crate::queue::QueueEntry, video: &crate::stream::VideoDetail) -> String {
+    let fetched = video.title.trim();
+    if entry.title == entry.video_id && !fetched.is_empty() {
+        fetched.to_string()
+    } else {
+        entry.title.clone()
+    }
 }
 
 /// The stream to actually fetch for `entry`: the itag it recorded, or — for
@@ -296,6 +316,55 @@ mod tests {
             output_path: "/tmp/downloadhub-test".to_string(),
             convert_to_mp3: false,
         }
+    }
+
+    fn video_detail(title: &str) -> crate::stream::VideoDetail {
+        crate::stream::VideoDetail {
+            video_id: "a".to_string(),
+            title: title.to_string(),
+            author: "Author".to_string(),
+            duration_seconds: 60,
+            formats: Vec::new(),
+        }
+    }
+
+    /// `enqueue` marks a title it couldn't look up by storing the video id
+    /// in its place; this is where that gets repaired.
+    #[tokio::test]
+    async fn a_placeholder_title_is_replaced_by_the_fetched_one() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let entry = store.add_entry(new_entry("a")).await.unwrap();
+        assert_eq!(entry.title, "a");
+
+        assert_eq!(
+            real_title(&entry, &video_detail("  A Real Title  ")),
+            "A Real Title"
+        );
+    }
+
+    /// A title the user has already seen in the queue must survive, even
+    /// when YouTube now reports a different one.
+    #[tokio::test]
+    async fn a_real_title_is_never_overwritten() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let mut new = new_entry("a");
+        new.title = "What The User Queued".to_string();
+        let entry = store.add_entry(new).await.unwrap();
+
+        assert_eq!(
+            real_title(&entry, &video_detail("Renamed Upstream")),
+            "What The User Queued"
+        );
+    }
+
+    /// A blank title would produce a nameless file, so the placeholder is
+    /// the better of the two.
+    #[tokio::test]
+    async fn a_blank_fetched_title_leaves_the_placeholder_alone() {
+        let store = QueueStore::open_in_memory().unwrap();
+        let entry = store.add_entry(new_entry("a")).await.unwrap();
+
+        assert_eq!(real_title(&entry, &video_detail("   ")), "a");
     }
 
     #[tokio::test]
