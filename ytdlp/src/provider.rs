@@ -29,7 +29,11 @@ impl YtDlpProvider {
             .clone()
             .or_else(locate_ytdlp)
             .ok_or(StreamError::YtDlpNotFound)?;
-        Ok(YtDlp::new(binary_path, config.cookies_path.clone()))
+        Ok(YtDlp::new(
+            binary_path,
+            config.cookies_path.clone(),
+            config.js_runtime,
+        ))
     }
 }
 

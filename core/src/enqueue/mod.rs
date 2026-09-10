@@ -1,9 +1,12 @@
 //! Bulk queue operations driven by a `FormatPreference` rather than an exact
-//! itag, resolving each video's own format list individually. A video that
-//! fails to resolve is skipped and reported rather than aborting the batch.
+//! itag. A video that can't be processed is skipped and reported rather than
+//! aborting the batch.
+
+use std::collections::HashMap;
 
 use crate::queue::{NewQueueEntry, QueueEntry, QueueError, QueueStore};
 use crate::stream::{FormatPreference, StreamClient, YtDlpConfig};
+use crate::youtube::{extract_video_id, YoutubeClient};
 
 /// One video that couldn't be processed, and why.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -27,51 +30,85 @@ pub struct ReformatOutcome {
     pub skipped: Vec<EnqueueSkip>,
 }
 
-/// Resolves each video's preferred format and adds it to the queue, one at
-/// a time (the lists involved are typically small enough that this isn't
-/// worth parallelizing yet — see `docs/ARCHITECTURE.md`).
+/// Adds each video to the queue **without** looking up its format list.
 ///
-/// `videos` entries may be full YouTube URLs or bare 11-character ids; the
-/// resolution step accepts either. The only error returned is a queue-store
-/// failure, since that affects every remaining video too — per-video
-/// failures land in `skipped`.
+/// The itag recorded is `itag_override`, or the one
+/// [`FormatPreference::presumed_itag`] assumes for `preference`. Nothing here
+/// verifies the video actually offers it, and that is the point: resolving a
+/// real itag costs one yt-dlp process per video (seconds each, sequentially),
+/// while the download path fetches the format list again anyway and can
+/// recover — an MP3 entry substitutes any audio stream on its own, and any
+/// other entry fails with the itag named, which the user fixes by picking a
+/// real format in the app (`set_queue_entry_format`).
+///
+/// `videos` entries may be full YouTube URLs or bare 11-character ids;
+/// anything else is skipped and reported. Titles come from `youtube` in one
+/// batched `videos.list` call rather than per video. Without a client, or if
+/// that call fails, entries are queued titled by their video id and the
+/// download path corrects them once it has the real metadata — queueing is
+/// the caller's actual goal, and a title lookup shouldn't be able to sink it.
+///
+/// The only error returned is a queue-store failure, since that affects every
+/// remaining video too.
 pub async fn enqueue_videos(
-    stream_client: &StreamClient,
+    youtube: Option<&YoutubeClient>,
     queue_store: &QueueStore,
     videos: &[String],
     preference: FormatPreference,
     output_path: &str,
-    ytdlp_config: &YtDlpConfig,
+    itag_override: Option<u32>,
 ) -> Result<EnqueueOutcome, QueueError> {
     let mut added = Vec::with_capacity(videos.len());
     let mut skipped = Vec::new();
+    let mut video_ids = Vec::with_capacity(videos.len());
 
     for video in videos {
-        match stream_client
-            .resolve_queue_format(video, preference, ytdlp_config)
-            .await
-        {
-            Ok((detail, format)) => {
-                let entry = queue_store
-                    .add_entry(NewQueueEntry {
-                        video_id: detail.video_id,
-                        title: detail.title,
-                        itag: format.itag,
-                        quality_label: format.quality_label,
-                        output_path: output_path.to_string(),
-                        convert_to_mp3: format.convert_to_mp3,
-                    })
-                    .await?;
-                added.push(entry);
-            }
-            Err(e) => skipped.push(EnqueueSkip {
+        match extract_video_id(video) {
+            Some(id) => video_ids.push(id),
+            None => skipped.push(EnqueueSkip {
                 video_id: video.clone(),
-                reason: e.to_string(),
+                reason: "not a YouTube video URL or 11-character video id".to_string(),
             }),
         }
     }
 
+    let titles = fetch_titles(youtube, &video_ids).await;
+    let itag = itag_override.unwrap_or_else(|| preference.presumed_itag());
+
+    for video_id in video_ids {
+        let title = titles
+            .get(&video_id)
+            .cloned()
+            .unwrap_or_else(|| video_id.clone());
+        let entry = queue_store
+            .add_entry(NewQueueEntry {
+                video_id,
+                title,
+                itag,
+                quality_label: preference.presumed_quality_label(),
+                output_path: output_path.to_string(),
+                convert_to_mp3: preference.convert_to_mp3(),
+            })
+            .await?;
+        added.push(entry);
+    }
+
     Ok(EnqueueOutcome { added, skipped })
+}
+
+/// Titles keyed by video id, best-effort: an absent client or a failed API
+/// call yields an empty map rather than an error (see [`enqueue_videos`]).
+async fn fetch_titles(
+    youtube: Option<&YoutubeClient>,
+    video_ids: &[String],
+) -> HashMap<String, String> {
+    let Some(youtube) = youtube else {
+        return HashMap::new();
+    };
+    youtube.fetch_titles(video_ids).await.unwrap_or_else(|e| {
+        eprintln!("enqueue: title lookup failed, queueing by video id instead: {e}");
+        HashMap::new()
+    })
 }
 
 /// Re-resolves existing queue entries against a new preference and updates
@@ -126,4 +163,131 @@ pub async fn reformat_entries(
     }
 
     Ok(ReformatOutcome { updated, skipped })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stream::{AUTO_AUDIO_ITAG, MP3_SOURCE_ITAG, PROGRESSIVE_ITAG};
+
+    async fn store() -> QueueStore {
+        QueueStore::open_in_memory().expect("in-memory queue db")
+    }
+
+    /// The whole point of the rewrite: no `StreamClient` is passed, and no
+    /// yt-dlp process runs, so this test needs no provider at all.
+    #[tokio::test]
+    async fn queues_without_looking_up_any_format() {
+        let store = store().await;
+        let videos = vec![
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+            "aaaaaaaaaaa".to_string(),
+        ];
+
+        let outcome = enqueue_videos(
+            None,
+            &store,
+            &videos,
+            FormatPreference::Mp3,
+            "/tmp/out",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.skipped.len(), 0);
+        assert_eq!(outcome.added.len(), 2);
+        assert_eq!(outcome.added[0].video_id, "dQw4w9WgXcQ");
+        assert_eq!(outcome.added[1].video_id, "aaaaaaaaaaa");
+        assert_eq!(store.list_entries().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn records_the_itag_each_preference_presumes() {
+        let store = store().await;
+        let videos = vec!["dQw4w9WgXcQ".to_string()];
+
+        for (preference, expected) in [
+            (FormatPreference::Mp3, AUTO_AUDIO_ITAG),
+            (FormatPreference::BestAudioOnly, MP3_SOURCE_ITAG),
+            (FormatPreference::BestProgressive, PROGRESSIVE_ITAG),
+        ] {
+            let outcome = enqueue_videos(None, &store, &videos, preference, "/tmp/out", None)
+                .await
+                .unwrap();
+            assert_eq!(outcome.added[0].itag, expected, "for {preference:?}");
+            assert_eq!(
+                outcome.added[0].convert_to_mp3,
+                preference == FormatPreference::Mp3
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_itag_override_wins_over_the_presumed_one() {
+        let store = store().await;
+        let outcome = enqueue_videos(
+            None,
+            &store,
+            &["dQw4w9WgXcQ".to_string()],
+            FormatPreference::Mp3,
+            "/tmp/out",
+            Some(251),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.added[0].itag, 251);
+        // The override changes the stream, never whether it's transcoded:
+        // that stays a property of the preference.
+        assert!(outcome.added[0].convert_to_mp3);
+    }
+
+    /// One unusable input must not cost the rest of the batch their place
+    /// in the queue.
+    #[tokio::test]
+    async fn skips_input_with_no_video_id_and_queues_the_rest() {
+        let store = store().await;
+        let videos = vec![
+            "https://www.youtube.com/playlist?list=PLabc123".to_string(),
+            "dQw4w9WgXcQ".to_string(),
+        ];
+
+        let outcome = enqueue_videos(
+            None,
+            &store,
+            &videos,
+            FormatPreference::Mp3,
+            "/tmp/out",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.added.len(), 1);
+        assert_eq!(outcome.skipped.len(), 1);
+        assert_eq!(
+            outcome.skipped[0].video_id,
+            "https://www.youtube.com/playlist?list=PLabc123"
+        );
+    }
+
+    /// Without a Data API client there is no title to be had, so the entry
+    /// is queued under its video id and `core::download` corrects it.
+    #[tokio::test]
+    async fn falls_back_to_the_video_id_as_title() {
+        let store = store().await;
+        let outcome = enqueue_videos(
+            None,
+            &store,
+            &["dQw4w9WgXcQ".to_string()],
+            FormatPreference::Mp3,
+            "/tmp/out",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.added[0].title, "dQw4w9WgXcQ");
+    }
 }

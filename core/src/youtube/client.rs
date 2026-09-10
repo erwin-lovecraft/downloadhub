@@ -113,6 +113,52 @@ impl YoutubeClient {
         Ok(results)
     }
 
+    /// Looks up just the titles for `video_ids`, keyed by id, via
+    /// `videos.list` batched 50 ids per request.
+    ///
+    /// This is what lets enqueueing skip yt-dlp entirely: a queue row needs
+    /// a title, and asking the Data API for a whole batch of them costs one
+    /// HTTP round-trip, where resolving them through yt-dlp costs one
+    /// process launch *per video* (see `core::enqueue`).
+    ///
+    /// Ids the API doesn't return — private, deleted, region-blocked, or
+    /// simply not a real id — are absent from the map rather than an error;
+    /// the caller decides what to do without a title.
+    pub async fn fetch_titles(
+        &self,
+        video_ids: &[String],
+    ) -> Result<HashMap<String, String>, YoutubeError> {
+        let mut titles = HashMap::new();
+
+        for batch in video_ids.chunks(VIDEOS_BATCH_SIZE) {
+            let ids = batch.join(",");
+            if ids.is_empty() {
+                continue;
+            }
+
+            let response = self
+                .http
+                .get(VIDEOS_URL)
+                .query(&[
+                    ("part", "snippet"),
+                    ("id", ids.as_str()),
+                    ("key", &self.api_key),
+                ])
+                .send()
+                .await?;
+            let response: VideosListResponse = parse_response(response).await?;
+
+            titles.extend(
+                response
+                    .items
+                    .into_iter()
+                    .filter_map(|item| item.into_title()),
+            );
+        }
+
+        Ok(titles)
+    }
+
     /// Fills in `duration_seconds` for each result via `videos.list`,
     /// batched (its `id` parameter accepts at most 50 ids per call).
     async fn enrich_with_durations(
@@ -157,6 +203,54 @@ impl YoutubeClient {
     }
 }
 
+/// Extracts the 11-character video id from a YouTube URL (`watch?v=`,
+/// `youtu.be/<id>`, `/shorts/<id>`, `/embed/<id>`, `/live/<id>`), or returns
+/// the input unchanged when it already is a bare id. `None` for anything
+/// else — including a non-YouTube URL that happens to carry a `v=`
+/// parameter, since queueing a video id lifted out of an unrelated site's
+/// URL is a guess, not an extraction.
+///
+/// Enqueueing needs this because it no longer runs yt-dlp, which used to be
+/// what turned a pasted URL into the id a queue row stores.
+pub fn extract_video_id(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if is_video_id(trimmed) {
+        return Some(trimmed.to_string());
+    }
+
+    let url = url::Url::parse(trimmed).ok()?;
+    let host = url.host_str()?.trim_start_matches("www.");
+    if !matches!(host, "youtube.com" | "m.youtube.com" | "youtu.be") {
+        return None;
+    }
+
+    let candidate = if host == "youtu.be" {
+        url.path_segments()?.next().map(str::to_string)
+    } else if let Some((_, value)) = url.query_pairs().find(|(key, _)| key == "v") {
+        Some(value.into_owned())
+    } else {
+        // `/shorts/<id>`, `/embed/<id>`, `/live/<id>` — the id is the
+        // segment after the marker, not the first one.
+        let mut segments = url.path_segments()?;
+        segments
+            .find(|s| matches!(*s, "shorts" | "embed" | "live" | "v"))
+            .and_then(|_| segments.next())
+            .map(str::to_string)
+    };
+
+    candidate.filter(|id| is_video_id(id))
+}
+
+/// YouTube video ids are exactly 11 characters of the URL-safe base64
+/// alphabet. Checking the shape keeps a stray path segment (`/playlist`)
+/// from being stored as an id.
+fn is_video_id(value: &str) -> bool {
+    value.len() == 11
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Extracts a playlist id from a `list=` query parameter if `input` parses
 /// as a URL (playlist page or a watch page with a playlist attached);
 /// otherwise treats the trimmed input as a bare playlist id already.
@@ -192,6 +286,54 @@ async fn parse_response<T: for<'de> Deserialize<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_video_id_from_every_youtube_url_shape() {
+        for url in [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL1&index=3",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?t=42",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+            "https://www.youtube.com/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+        ] {
+            assert_eq!(
+                extract_video_id(url).as_deref(),
+                Some("dQw4w9WgXcQ"),
+                "failed on {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn passes_through_a_bare_video_id() {
+        assert_eq!(
+            extract_video_id("  dQw4w9WgXcQ  ").as_deref(),
+            Some("dQw4w9WgXcQ")
+        );
+    }
+
+    /// A path segment that isn't an id must not be stored as one — the
+    /// queue row would then point at a video that doesn't exist.
+    #[test]
+    fn rejects_input_carrying_no_video_id() {
+        for input in [
+            "not a video",
+            "short",
+            "https://www.youtube.com/playlist?list=PLabc123",
+            "https://www.youtube.com/results?search_query=lofi",
+            // A valid-looking id on a host that isn't YouTube's.
+            "https://example.com/watch?v=dQw4w9WgXcQ",
+        ] {
+            assert_eq!(
+                extract_video_id(input),
+                None,
+                "should not have found an id in {input}"
+            );
+        }
+    }
 
     #[test]
     fn extracts_playlist_id_from_playlist_url() {

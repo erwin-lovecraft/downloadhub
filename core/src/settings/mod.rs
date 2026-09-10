@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::stream::FormatPreference;
+use crate::stream::{FormatPreference, JsRuntime};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
@@ -54,6 +54,22 @@ pub struct AppSettings {
     /// user's own file lets yt-dlp keep it current.
     #[serde(default)]
     pub ytdlp_cookies_path: Option<String>,
+    /// Which JavaScript engine yt-dlp may use for YouTube's "n" challenge —
+    /// see [`JsRuntime`]. Defaults to `Auto`, including for settings files
+    /// written before this field existed.
+    #[serde(default)]
+    pub ytdlp_js_runtime: JsRuntime,
+    /// The itag every newly enqueued entry records, instead of the one
+    /// [`FormatPreference::presumed_itag`] would pick for its preference.
+    /// `None` (the default) uses those per-preference itags.
+    ///
+    /// Neither setting consults the video's real format list — enqueueing
+    /// deliberately doesn't, since that costs a yt-dlp process per video
+    /// and the download path fetches the list again regardless. This field
+    /// is for a user who knows the itag they always want (a fixed audio
+    /// stream, say) and would rather every entry carry it.
+    #[serde(default)]
+    pub enqueue_itag: Option<u32>,
 }
 
 fn default_mcp_enabled() -> bool {
@@ -69,6 +85,8 @@ impl Default for AppSettings {
             ffmpeg_path: None,
             ytdlp_path: None,
             ytdlp_cookies_path: None,
+            ytdlp_js_runtime: JsRuntime::default(),
+            enqueue_itag: None,
         }
     }
 }
@@ -151,6 +169,10 @@ mod tests {
             ffmpeg_path: Some("/opt/homebrew/bin/ffmpeg".to_string()),
             ytdlp_path: Some("/opt/homebrew/bin/yt-dlp".to_string()),
             ytdlp_cookies_path: Some("/tmp/cookies.txt".to_string()),
+            // Deliberately not the default, so the roundtrip proves the
+            // field is actually persisted rather than re-defaulted on load.
+            ytdlp_js_runtime: JsRuntime::Node,
+            enqueue_itag: Some(140),
         };
         save(&path, &settings).await.unwrap();
 

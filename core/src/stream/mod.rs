@@ -8,12 +8,12 @@ mod models;
 mod provider;
 
 pub use client::StreamClient;
-pub use config::{resolve_ytdlp_config, YtDlpConfig};
-pub use cookies::{inspect_cookie_file, CookieFileReport};
+pub use config::{resolve_ytdlp_config, JsRuntime, YtDlpConfig};
+pub use cookies::{failed_probe_verdict, inspect_cookie_file, CookieCheck, CookieFileReport};
 pub(crate) use models::select_format;
 pub use models::{
     FormatFallback, FormatPreference, FormatRequest, FormatSummary, ResolvedFormat, VideoDetail,
-    AUTO_AUDIO_ITAG, MP3_SOURCE_ITAG,
+    AUTO_AUDIO_ITAG, MP3_SOURCE_ITAG, PROGRESSIVE_ITAG,
 };
 pub use provider::{BoxFuture, StreamProvider};
 

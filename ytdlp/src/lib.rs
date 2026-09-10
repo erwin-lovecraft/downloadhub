@@ -4,6 +4,8 @@
 //! the InnerTube-client library this replaced.
 
 use std::path::{Path, PathBuf};
+
+use downloadhub_core::stream::JsRuntime;
 use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -168,13 +170,19 @@ impl From<RawVideoInfo> for Video {
 pub struct YtDlp {
     binary_path: PathBuf,
     cookies_path: Option<PathBuf>,
+    js_runtime: JsRuntime,
 }
 
 impl YtDlp {
-    pub fn new(binary_path: impl Into<PathBuf>, cookies_path: Option<PathBuf>) -> Self {
+    pub fn new(
+        binary_path: impl Into<PathBuf>,
+        cookies_path: Option<PathBuf>,
+        js_runtime: JsRuntime,
+    ) -> Self {
         Self {
             binary_path: binary_path.into(),
             cookies_path,
+            js_runtime,
         }
     }
 
@@ -188,6 +196,7 @@ impl YtDlp {
             cmd.arg("--cookies").arg(cookies);
         }
         cmd.arg("--no-warnings").arg("--no-playlist");
+        cmd.args(js_runtime_args(self.js_runtime));
         // yt-dlp is Python: with stdout on a pipe it encodes output using the
         // *locale* code page, which on a non-English Windows (cp1252, cp1258,
         // cp932...) is not UTF-8. Ask for UTF-8 explicitly so lines carrying a
@@ -326,6 +335,24 @@ fn parse_progress_line(line: &str) -> Option<(u64, u64)> {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
     Some((downloaded, total))
+}
+
+/// The `--js-runtimes` flags for `runtime`.
+///
+/// `--js-runtimes` names **one** engine per occurrence — a comma-separated
+/// list is read as a single bogus engine name and silently leaves the
+/// challenge unsolved — so forcing one engine means clearing the defaults
+/// first. `Off` passes nothing at all, for a yt-dlp too old to know the
+/// option.
+fn js_runtime_args(runtime: JsRuntime) -> &'static [&'static str] {
+    match runtime {
+        // Additive: Deno stays enabled by yt-dlp's own default and keeps its
+        // higher priority, so this only adds a fallback.
+        JsRuntime::Auto => &["--js-runtimes", "node"],
+        JsRuntime::Node => &["--no-js-runtimes", "--js-runtimes", "node"],
+        JsRuntime::Deno => &["--no-js-runtimes", "--js-runtimes", "deno"],
+        JsRuntime::Off => &[],
+    }
 }
 
 fn classify_error(stderr: &[u8]) -> Error {
@@ -558,5 +585,28 @@ mod tests {
         assert!(!format.has_audio());
         assert_eq!(format.quality_label.as_deref(), Some("1080p"));
         assert_eq!(format.bitrate, Some(2_500_000));
+    }
+
+    #[test]
+    fn auto_adds_node_without_disturbing_denos_default() {
+        // Additive on purpose: yt-dlp still prefers Deno where it exists.
+        assert_eq!(js_runtime_args(JsRuntime::Auto), ["--js-runtimes", "node"]);
+    }
+
+    #[test]
+    fn forcing_one_engine_clears_the_defaults_first() {
+        // Without --no-js-runtimes, Deno would still win on priority and
+        // "force node" would be a lie.
+        assert_eq!(
+            js_runtime_args(JsRuntime::Node),
+            ["--no-js-runtimes", "--js-runtimes", "node"]
+        );
+    }
+
+    #[test]
+    fn off_passes_no_flag_at_all() {
+        // Not "no engines" — an older yt-dlp aborts on the unknown option,
+        // which would break every download rather than just the cookie ones.
+        assert!(js_runtime_args(JsRuntime::Off).is_empty());
     }
 }

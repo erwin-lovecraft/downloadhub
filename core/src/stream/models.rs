@@ -71,6 +71,40 @@ impl FormatPreference {
     pub fn convert_to_mp3(self) -> bool {
         matches!(self, FormatPreference::Mp3)
     }
+
+    /// The itag to record for this preference *without* looking at the
+    /// video's actual format list — what enqueueing writes, since resolving
+    /// a real itag costs a yt-dlp process per video and the download path
+    /// fetches the format list again anyway (`core::download::runner`).
+    ///
+    /// Each is the format the preference would almost always have picked:
+    /// [`AUTO_AUDIO_ITAG`] for MP3 (the source stream is an implementation
+    /// detail the transcode erases, so there is nothing to guess),
+    /// [`MP3_SOURCE_ITAG`] for audio-only, and [`PROGRESSIVE_ITAG`] for
+    /// video. A guess that turns out wrong is recoverable: MP3 entries fall
+    /// back to any audio stream on their own, and the other two fail the
+    /// download with the itag named, which the user fixes by picking a real
+    /// format from `get_video_formats` (`set_queue_entry_format`).
+    pub fn presumed_itag(self) -> u32 {
+        match self {
+            FormatPreference::BestProgressive => PROGRESSIVE_ITAG,
+            FormatPreference::BestAudioOnly => MP3_SOURCE_ITAG,
+            FormatPreference::Mp3 => AUTO_AUDIO_ITAG,
+        }
+    }
+
+    /// The quality label to show for an entry queued at
+    /// [`Self::presumed_itag`]. Deliberately vague ("best audio") rather
+    /// than a precise "128kbps m4a": nothing has checked the video's format
+    /// list yet, so a precise label would be a claim this hasn't verified.
+    pub fn presumed_quality_label(self) -> Option<String> {
+        let label = match self {
+            FormatPreference::BestProgressive => "video + audio",
+            FormatPreference::BestAudioOnly => "best audio",
+            FormatPreference::Mp3 => "best audio",
+        };
+        Some(label.to_string())
+    }
 }
 
 /// itag 140 is the standard 128 kbps AAC (m4a) audio-only stream, present
@@ -78,6 +112,14 @@ impl FormatPreference {
 /// itag 139 (~48 kbps HE-AAC), whose low quality would compound with the
 /// lossy-to-lossy conversion.
 pub const MP3_SOURCE_ITAG: u32 = 140;
+
+/// itag 18 is the 360p H.264/AAC progressive (muxed) mp4 stream — the one
+/// format YouTube has served on essentially every video for the life of the
+/// site, which is what makes it a safe guess for a video entry queued
+/// without checking the format list. Not the *best* progressive stream the
+/// preference names, but the only one dependable enough to assume; a user
+/// who wants better picks it from the real format list in the app.
+pub const PROGRESSIVE_ITAG: u32 = 18;
 
 /// Stand-in itag on an MP3 queue entry whose source stream is left for the
 /// provider to pick at download time. Not a real itag (YouTube's start at
